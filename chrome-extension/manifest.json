@@ -22,7 +22,7 @@
     },
     {
       "matches": ["https://weidian.com/*", "https://*.weidian.com/*"],
-      "js": ["content.js"],
+      "js": ["content.js", "member-simulator.js"],
       "run_at": "document_idle"
     }
   ],
