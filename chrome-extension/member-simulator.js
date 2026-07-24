@@ -161,6 +161,11 @@
     if (!state.active || !state.preview || state.applying || !document.body) return;
     state.applying = true;
     try {
+      if (!isSimulationEligiblePage()) {
+        restoreOriginalDom();
+        removeBadge();
+        return;
+      }
       pruneDisconnectedOriginals();
       const preview = state.preview;
       const targetProfile = profileForRank(preview.rank);
@@ -277,10 +282,8 @@
   function handleNavigation() {
     if (location.href === state.lastHref) return;
     state.lastHref = location.href;
+    restoreOriginalDom();
     state.baseDiscountRate = undefined;
-    state.originalText.clear();
-    state.originalStyle.clear();
-    state.originalDataset.clear();
     if (state.active) scheduleApply(350);
     else void restoreStoredPreview();
   }
@@ -369,6 +372,14 @@
   function formatNumber(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? trimTrailingZeros(numeric.toFixed(2)) : '0';
+  }
+
+  function isSimulationEligiblePage() {
+    const url = new URL(location.href);
+    if (/(?:cashier|confirm-order|create-order|payment|pay-h5)/i.test(`${url.hostname}${url.pathname}`)) return false;
+    const bodyText = String(document.body?.innerText || document.body?.textContent || '').slice(0, 80_000);
+    return /(?:member|mkt-h5-member-detail|decoration\/uni-mine)/i.test(url.pathname) ||
+      /(?:会员卡详情|会员尊享|会员等级|会员权益|會員等級|VIP[0-9]|회원등급)/i.test(bodyText);
   }
 
   function containsCurrency(text) {
