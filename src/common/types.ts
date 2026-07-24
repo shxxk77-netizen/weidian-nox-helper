@@ -248,6 +248,8 @@ export type BrowserCommandType =
   | 'save-representative-image'
   | 'save-all-images';
 
+export type BrowserCommandAlias = 'save_vip_grades';
+
 export interface BrowserCommand {
   id: string;
   type: BrowserCommandType;
@@ -295,7 +297,10 @@ export interface RendererApi {
   copyText: (text: string) => Promise<void>;
   saveCurrentStore: (store: Omit<SavedStore, 'savedAtIso'>) => Promise<AppSettings>;
   deleteSavedStore: (id: string) => Promise<AppSettings>;
-  queueBrowserCommand: (type: BrowserCommandType, payload?: Record<string, unknown>) => Promise<BrowserCommand>;
+  queueBrowserCommand: (
+    type: BrowserCommandType | BrowserCommandAlias,
+    payload?: Record<string, unknown>
+  ) => Promise<BrowserCommand>;
   startBrowserReservation: (request: BrowserReservationRequest) => Promise<BrowserReservationStatus>;
   stopBrowserReservation: () => Promise<BrowserReservationStatus>;
   getBrowserReservationStatus: () => Promise<BrowserReservationStatus>;

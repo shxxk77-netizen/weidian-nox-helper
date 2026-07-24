@@ -4,6 +4,7 @@ import type {
   AppSettings,
   BrowserBridgeState,
   BrowserCommand,
+  BrowserCommandAlias,
   BrowserCommandType,
   BrowserReservationRequest,
   BrowserReservationStatus,
@@ -12,6 +13,7 @@ import type {
   SavedStore,
   TimeSyncSnapshot
 } from '../common/types';
+import { normalizeBrowserCommandType } from '../common/memberContract';
 
 const api: RendererApi = {
   getConfig: (): Promise<AppConfigPayload> => ipcRenderer.invoke('config:get'),
@@ -33,9 +35,10 @@ const api: RendererApi = {
     ipcRenderer.invoke('browser:save-store', store),
   deleteSavedStore: (id: string): Promise<AppSettings> => ipcRenderer.invoke('browser:delete-store', id),
   queueBrowserCommand: (
-    type: BrowserCommandType,
+    type: BrowserCommandType | BrowserCommandAlias,
     payload?: Record<string, unknown>
-  ): Promise<BrowserCommand> => ipcRenderer.invoke('browser:queue-command', type, payload),
+  ): Promise<BrowserCommand> =>
+    ipcRenderer.invoke('browser:queue-command', normalizeBrowserCommandType(type), payload),
   startBrowserReservation: (request: BrowserReservationRequest): Promise<BrowserReservationStatus> =>
     ipcRenderer.invoke('browser:reservation-start', request),
   stopBrowserReservation: (): Promise<BrowserReservationStatus> => ipcRenderer.invoke('browser:reservation-stop'),

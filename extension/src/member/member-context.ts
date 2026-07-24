@@ -1,19 +1,14 @@
 import type { MemberPageContext } from '../../../src/common/types';
+import { parseMemberDetailPageRoute } from '../../../src/common/memberContract';
 import { MemberActionError } from './member-errors';
 
 export function validateMemberPageContext(context: MemberPageContext): MemberPageContext {
-  let pageUrl: URL;
-  try {
-    pageUrl = new URL(context.pageUrl);
-  } catch {
-    throw new MemberActionError('TARGET_PAGE_MISMATCH');
-  }
-  if (
-    pageUrl.protocol !== 'https:' ||
-    !/(^|\.)weidian\.com$/i.test(pageUrl.hostname) ||
-    !/mkt-h5-member-detail/i.test(pageUrl.pathname)
-  ) {
-    throw new MemberActionError('TARGET_PAGE_MISMATCH', '현재 페이지가 Weidian Member 상세 페이지가 아닙니다.');
+  const memberRoute = parseMemberDetailPageRoute(context.pageUrl);
+  if (!memberRoute || memberRoute.shopId !== context.shopId) {
+    throw new MemberActionError(
+      'TARGET_PAGE_MISMATCH',
+      '현재 페이지가 /m/mkt-h5-member-detail/index?shopId=... 형식의 Weidian Member 상세 페이지가 아닙니다.'
+    );
   }
   if (!context.shopId) throw new MemberActionError('SHOP_ID_MISSING');
   if (!context.sessionFingerprint) throw new MemberActionError('SESSION_FINGERPRINT_FAILED');
@@ -27,7 +22,8 @@ export function validateMemberPageContext(context: MemberPageContext): MemberPag
   }
   return {
     ...context,
-    origin: pageUrl.origin,
+    origin: memberRoute.url.origin,
+    pageUrl: memberRoute.url.href,
     gradeNames: [...context.gradeNames],
     currentName: context.currentName?.trim().slice(0, 80) || context.gradeNames[context.currentServerIndex],
     remaining: finiteNonNegative(context.remaining),
