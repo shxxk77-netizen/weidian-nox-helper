@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "노무현 Companion",
+  "version": "0.4.0",
+  "description": "노무현 데스크톱 앱과 Chrome의 Weidian 페이지를 연결합니다.",
+  "permissions": ["alarms", "cookies", "downloads", "storage", "tabs", "webRequest"],
+  "host_permissions": [
+    "https://weidian.com/*",
+    "https://*.weidian.com/*",
+    "http://127.0.0.1:17873/*",
+    "http://127.0.0.1:4173/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://weidian.com/*", "https://*.weidian.com/*"],
+      "js": ["page-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://weidian.com/*", "https://*.weidian.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "노무현"
+  }
+}

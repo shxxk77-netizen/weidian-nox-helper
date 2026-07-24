@@ -1,0 +1,60 @@
+{
+  "name": "ew-weidian",
+  "version": "0.4.0",
+  "description": "노무현 — macOS Chrome companion for Weidian product viewing, local membership preview, image saving, time sync, and user-approved checkout preparation.",
+  "author": "Local",
+  "private": true,
+  "main": "out/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build-tests.mjs && node --test .test-dist/tests/*.test.js",
+    "mock:member": "MEMBER_LAB_MODE=fixed node scripts/mock-member-server.mjs",
+    "lab:member:vulnerable": "MEMBER_LAB_MODE=vulnerable node scripts/mock-member-server.mjs",
+    "lab:member:fixed": "MEMBER_LAB_MODE=fixed node scripts/mock-member-server.mjs",
+    "lab:member:verify": "node scripts/build-tests.mjs && node --test .test-dist/tests/member-security-lab.test.js",
+    "build:source": "node scripts/build-source.mjs",
+    "package:local": "node scripts/package-local.mjs",
+    "build": "node scripts/build-source.mjs && electron-builder --mac dir"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.5.2",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "build": {
+    "appId": "local.ew.weidian",
+    "productName": "노무현",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "chrome-extension/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "chrome-extension",
+        "to": "chrome-extension"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}
