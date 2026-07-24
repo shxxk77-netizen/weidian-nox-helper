@@ -33,7 +33,26 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        id: install
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          pnpm install --no-frozen-lockfile 2>&1 | Tee-Object -FilePath install.log
+          exit $LASTEXITCODE
+
+      - name: Upload install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-diagnostics
+          path: install.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Stop after install failure
+        if: steps.install.outcome == 'failure'
+        shell: pwsh
+        run: throw 'Dependency installation failed. See windows-install-diagnostics.'
 
       - name: Typecheck
         run: pnpm run typecheck
