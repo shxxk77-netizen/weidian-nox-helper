@@ -26,6 +26,15 @@ await Promise.all([
     logLevel: 'info'
   }),
   esbuild.build({
+    entryPoints: [path.join(root, 'extension/src/member-simulator.ts')],
+    outfile: path.join(root, 'chrome-extension/member-simulator.js'),
+    bundle: true,
+    platform: 'browser',
+    format: 'iife',
+    target: ['chrome120'],
+    logLevel: 'info'
+  }),
+  esbuild.build({
     entryPoints: [path.join(root, 'extension/src/page-main.ts')],
     outfile: path.join(root, 'chrome-extension/page-main.js'),
     bundle: true,
