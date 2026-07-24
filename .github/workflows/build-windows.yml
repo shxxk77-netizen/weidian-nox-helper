@@ -1,0 +1,77 @@
+name: Build Windows portable
+
+on:
+  push:
+    branches:
+      - agent/member-preview-simulator
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.5
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        id: install
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          pnpm install --no-frozen-lockfile 2>&1 | Tee-Object -FilePath install.log
+          exit $LASTEXITCODE
+
+      - name: Upload install diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-diagnostics
+          path: install.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Stop after install failure
+        if: steps.install.outcome == 'failure'
+        shell: pwsh
+        run: throw 'Dependency installation failed. See windows-install-diagnostics.'
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build source bundles
+        run: pnpm run build:source
+
+      - name: Build Windows portable executable
+        run: pnpm exec electron-builder --win portable --x64 --publish never
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: weidian-helper-windows-x64
+          path: |
+            release/**/*.exe
+            chrome-extension/**
+          if-no-files-found: error
+          retention-days: 14
