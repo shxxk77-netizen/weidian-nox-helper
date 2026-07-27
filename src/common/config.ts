@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppSettings, BrowserMemberLevel, BrowserMemberPreview, SavedStore } from './types';
+import {
+  DEFAULT_MEMBER_API_CONNECTION,
+  type MemberApiConnectionSettings
+} from './memberAnalysisContract';
 
 export function createDefaultSettings(): AppSettings {
   return {
@@ -21,6 +25,7 @@ export function createDefaultSettings(): AppSettings {
     browserMemberPreviewByShop: {},
     browserReservationOptionKeyword: '',
     browserReservationMode: 'preview',
+    browserMemberApi: { ...DEFAULT_MEMBER_API_CONNECTION },
     savedStores: []
   };
 }
@@ -80,8 +85,63 @@ function normalizeSettings(input: Partial<AppSettings>, defaults: AppSettings): 
     browserMemberPreviewByShop: normalizePreviewByShop(input.browserMemberPreviewByShop),
     browserReservationOptionKeyword: input.browserReservationOptionKeyword?.trim() ?? defaults.browserReservationOptionKeyword,
     browserReservationMode: input.browserReservationMode === 'checkout' ? 'checkout' : 'preview',
+    browserMemberApi: normalizeMemberApiConnection(input.browserMemberApi, defaults.browserMemberApi),
     savedStores: normalizeStores(input.savedStores, defaults.savedStores)
   };
+}
+
+function normalizeMemberApiConnection(
+  input: (Partial<MemberApiConnectionSettings> & {
+    stateEndpoint?: string;
+    actionTokenEndpoint?: string;
+    resetEndpoint?: string;
+  }) | undefined,
+  defaults: MemberApiConnectionSettings
+): MemberApiConnectionSettings {
+  const legacyMockConnection =
+    Boolean(input?.actionTokenEndpoint || input?.stateEndpoint || input?.resetEndpoint) &&
+    !input?.catalogEndpoint &&
+    !input?.bulkSaveEndpoint &&
+    !input?.verifyEndpoint;
+  if (legacyMockConnection) {
+    return { ...defaults };
+  }
+  return {
+    baseUrl: normalizeHttpUrl(input?.baseUrl, defaults.baseUrl),
+    catalogEndpoint: normalizeEndpoint(
+      input?.catalogEndpoint ?? input?.stateEndpoint,
+      defaults.catalogEndpoint
+    ),
+    saveEndpoint: normalizeEndpoint(input?.saveEndpoint, defaults.saveEndpoint),
+    bulkSaveEndpoint: normalizeEndpoint(
+      input?.bulkSaveEndpoint ?? input?.resetEndpoint,
+      defaults.bulkSaveEndpoint
+    ),
+    verifyEndpoint: normalizeEndpoint(input?.verifyEndpoint, defaults.verifyEndpoint)
+  };
+}
+
+function normalizeHttpUrl(value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return fallback;
+  try {
+    const parsed = new URL(text);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return fallback;
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeEndpoint(value: unknown, fallback: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return fallback;
+  if (/^https?:\/\//i.test(text)) return normalizeHttpUrl(text, fallback);
+  if (!text.startsWith('/')) return fallback;
+  return text.slice(0, 2_000);
 }
 
 function normalizeLevelsByShop(input: unknown): Record<string, BrowserMemberLevel[]> {
@@ -150,7 +210,7 @@ function normalizeWatermarkText(value: string | undefined, fallback: string): st
 }
 
 function isLegacyWatermarkText(value: string | undefined): boolean {
-  return value?.trim() === '은우짱짱123';
+  return ['은우짱짱123', '노무현'].includes(value?.trim() || '');
 }
 
 function normalizeStores(input: unknown, fallback: SavedStore[]): SavedStore[] {

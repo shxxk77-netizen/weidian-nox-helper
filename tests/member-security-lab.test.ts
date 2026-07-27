@@ -58,8 +58,11 @@ test('취약 모드는 일반 회원의 serverIndex 및 진행도 변조를 재�
     body: {
       shopId: MEMBER_LAB_PRIMARY_SHOP_ID,
       actionToken: token,
-      serverIndex: before.serverIndex,
+      serverIndex: 5,
       targetIndex: 5,
+      gradeCount: before.gradeCount,
+      gradeNames: before.gradeNames[5],
+      name: before.gradeNames[5],
       remaining: 0,
       originalProgress: 100,
       role: 'platform-admin'
@@ -80,8 +83,11 @@ test('취약 모드는 일반 회원의 serverIndex 및 진행도 변조를 재�
     body: {
       shopId: MEMBER_LAB_PRIMARY_SHOP_ID,
       actionToken: token,
-      serverIndex: 5,
-      targetIndex: 4
+      serverIndex: 4,
+      targetIndex: 4,
+      gradeCount: before.gradeCount,
+      gradeNames: before.gradeNames[4],
+      name: before.gradeNames[4]
     }
   });
   assert.equal(replay.status, 409);
@@ -193,28 +199,31 @@ test('수정 모드는 역할·상점 권한·필드 allowlist·등급 산정 �
   assert.equal(initial.targetIndex, 3);
 
   const memberDenied = await saveWithFreshToken(lab, member.cookie, {
-    serverIndex: 1,
+    serverIndex: 3,
     targetIndex: 3,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames
+    gradeNames: initial.gradeNames[3],
+    name: initial.gradeNames[3]
   });
   assert.equal(memberDenied.status, 403);
   assert.equal(memberDenied.body.errorCode, 'PERMISSION_DENIED');
 
   const wrongShopDenied = await saveWithFreshToken(lab, adminB.cookie, {
-    serverIndex: 1,
+    serverIndex: 3,
     targetIndex: 3,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames
+    gradeNames: initial.gradeNames[3],
+    name: initial.gradeNames[3]
   });
   assert.equal(wrongShopDenied.status, 403);
   assert.equal(wrongShopDenied.body.errorCode, 'SHOP_PERMISSION_DENIED');
 
   const fieldDenied = await saveWithFreshToken(lab, adminA.cookie, {
-    serverIndex: 1,
+    serverIndex: 3,
     targetIndex: 3,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames,
+    gradeNames: initial.gradeNames[3],
+    name: initial.gradeNames[3],
     remaining: 0
   });
   assert.equal(fieldDenied.status, 400);
@@ -225,26 +234,29 @@ test('수정 모드는 역할·상점 권한·필드 allowlist·등급 산정 �
     serverIndex: 0,
     targetIndex: 3,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames
+    gradeNames: initial.gradeNames[3],
+    name: initial.gradeNames[3]
   });
   assert.equal(staleStateDenied.status, 409);
   assert.equal(staleStateDenied.body.errorCode, 'SERVER_INDEX_MISMATCH');
 
   const ruleDenied = await saveWithFreshToken(lab, adminA.cookie, {
-    serverIndex: 1,
+    serverIndex: 5,
     targetIndex: 5,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames
+    gradeNames: initial.gradeNames[5],
+    name: initial.gradeNames[5]
   });
   assert.equal(ruleDenied.status, 422);
   assert.equal(ruleDenied.body.errorCode, 'GRADE_RULE_VIOLATION');
   assert.equal(ruleDenied.body.eligibleTargetIndex, 3);
 
   const saved = await saveWithFreshToken(lab, adminA.cookie, {
-    serverIndex: 1,
+    serverIndex: 3,
     targetIndex: 3,
     gradeCount: initial.gradeCount,
-    gradeNames: initial.gradeNames
+    gradeNames: initial.gradeNames[3],
+    name: initial.gradeNames[3]
   });
   assert.equal(saved.status, 200);
   assert.equal(saved.body.policy, 'role-shop-field-and-grade-rule');
@@ -257,17 +269,20 @@ test('수정 모드는 역할·상점 권한·필드 allowlist·등급 산정 �
   assert.equal(after.originalProgress, 20);
 });
 
-test('실제 Weidian 쓰기 어댑터는 두 모드 모두 명시적으로 비활성 상태다', async (t) => {
+test('두 랩 정책 모드는 동일한 POST endpoint 계약을 제공한다', async (t) => {
   for (const mode of [MEMBER_LAB_MODES.VULNERABLE, MEMBER_LAB_MODES.FIXED] as LabMode[]) {
     const lab = await startLab(mode);
     t.after(() => lab.close());
     const health = await lab.request('/health', { method: 'GET' });
     assert.equal(health.status, 200);
-    assert.equal(health.body.liveWeidianAdapter.status, 'disabled');
-    assert.equal(
-      health.body.liveWeidianAdapter.errorCode,
-      'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
-    );
+    assert.deepEqual(health.body.memberApi, {
+      method: 'POST',
+      contentType: 'application/json',
+      state: '/api/member/context',
+      actionToken: '/api/member/action-token',
+      save: '/api/member/save',
+      reset: '/api/member/reset'
+    });
   }
 });
 

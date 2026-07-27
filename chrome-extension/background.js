@@ -57,14 +57,14 @@
           status: "empty",
           shopId: context.shopId,
           action,
-          oneTime: true
+          oneTime: false
         };
       }
       if (token.expiresAtEpochMs !== void 0 && token.expiresAtEpochMs <= this.now()) {
         this.tokens.delete(key);
         const expired = this.meta(token, "expired", {
           lastErrorCode: "ACTION_TOKEN_EXPIRED",
-          lastErrorMessage: "actionToken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
+          lastErrorMessage: "wdtoken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
         });
         this.statusOverrides.set(key, expired);
         this.publish(context, expired);
@@ -78,14 +78,14 @@
       this.assertContext(context);
       const key = this.tokenKey(context, action);
       if (this.acquiring.has(key)) {
-        throw new MemberActionError("ACTION_TOKEN_ALREADY_ACQUIRING", "actionToken \uBC1C\uAE09\uC774 \uC774\uBBF8 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4.");
+        throw new MemberActionError("ACTION_TOKEN_ALREADY_ACQUIRING", "wdtoken \uAC10\uC9C0\uAC00 \uC774\uBBF8 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4.");
       }
       this.tokens.delete(key);
       const acquiringMeta = {
         status: "acquiring",
         shopId: context.shopId,
         action,
-        oneTime: true
+        oneTime: false
       };
       this.statusOverrides.set(key, acquiringMeta);
       this.publish(context, acquiringMeta);
@@ -98,7 +98,7 @@
           status: errorCodeToTokenStatus(caught.code),
           shopId: context.shopId,
           action,
-          oneTime: true,
+          oneTime: false,
           lastErrorCode: caught.code,
           lastErrorMessage: caught.message
         };
@@ -115,10 +115,10 @@
       this.assertContext(context);
       const rawToken = acquired.rawToken?.trim();
       if (!rawToken) {
-        throw new MemberActionError("ACTION_TOKEN_MISSING", "\uAC10\uC9C0\uB41C actionToken\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
+        throw new MemberActionError("ACTION_TOKEN_MISSING", "\uAC10\uC9C0\uB41C wdtoken\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
       }
       if (acquired.expiresAtEpochMs !== void 0 && acquired.expiresAtEpochMs <= this.now()) {
-        throw new MemberActionError("ACTION_TOKEN_EXPIRED", "\uAC10\uC9C0\uB41C actionToken\uC774 \uC774\uBBF8 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+        throw new MemberActionError("ACTION_TOKEN_EXPIRED", "\uAC10\uC9C0\uB41C wdtoken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
       }
       const key = this.tokenKey(context, action);
       const fingerprint = await fingerprintToken(rawToken);
@@ -195,14 +195,14 @@
       this.tokens.delete(key);
       const expiredMeta = token ? this.meta(token, "expired", {
         lastErrorCode: "ACTION_TOKEN_EXPIRED",
-        lastErrorMessage: "actionToken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
+        lastErrorMessage: "wdtoken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
       }) : {
         status: "expired",
         shopId: context.shopId,
         action,
-        oneTime: true,
+        oneTime: false,
         lastErrorCode: "ACTION_TOKEN_EXPIRED",
-        lastErrorMessage: "actionToken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
+        lastErrorMessage: "wdtoken\uC774 \uB9CC\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."
       };
       this.statusOverrides.set(key, expiredMeta);
       this.publish(context, expiredMeta);
@@ -218,7 +218,7 @@
         status: "invalid",
         shopId: context.shopId,
         action,
-        oneTime: true,
+        oneTime: false,
         lastErrorCode: "ACTION_TOKEN_INVALID",
         lastErrorMessage: sanitizeMemberErrorMessage(reason)
       };
@@ -234,7 +234,7 @@
           status,
           shopId: context.shopId,
           action,
-          oneTime: true
+          oneTime: false
         },
         lastErrorCode: code,
         lastErrorMessage: sanitizeMemberErrorMessage(message)
@@ -291,13 +291,13 @@
         if (token.shopId === context.shopId && token.sessionFingerprint !== context.sessionFingerprint) {
           return this.meta(token, "session-mismatch", {
             lastErrorCode: "SESSION_CHANGED",
-            lastErrorMessage: "\uB85C\uADF8\uC778 \uC138\uC158\uC774 \uBCC0\uACBD\uB418\uC5B4 \uAE30\uC874 actionToken\uC744 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
+            lastErrorMessage: "\uB85C\uADF8\uC778 \uC138\uC158\uC774 \uBCC0\uACBD\uB418\uC5B4 \uAE30\uC874 wdtoken\uC744 \uC0AC\uC6A9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
           });
         }
         if (token.sessionFingerprint === context.sessionFingerprint && token.shopId !== context.shopId) {
           return this.meta(token, "shop-mismatch", {
             lastErrorCode: "SHOP_ID_MISMATCH",
-            lastErrorMessage: "\uB2E4\uB978 \uC0C1\uC810\uC5D0\uC11C \uBC1C\uAE09\uB41C actionToken\uC785\uB2C8\uB2E4."
+            lastErrorMessage: "\uB2E4\uB978 \uC0C1\uC810 \uCEE8\uD14D\uC2A4\uD2B8\uC5D0\uC11C \uAC10\uC9C0\uB41C wdtoken\uC785\uB2C8\uB2E4."
           });
         }
       }
@@ -324,96 +324,113 @@
     return [...new Uint8Array(digest)].slice(0, 6).map((value) => value.toString(16).padStart(2, "0")).join("");
   }
 
+  // src/common/memberAnalysisContract.ts
+  var MEMBER_API_BASE_URL = "https://thor.weidian.com";
+  var MEMBER_API_ENDPOINTS = Object.freeze({
+    catalog: "/wdcrm/trade.searchMemberByShopId/1.0",
+    save: "/wdcrm/trade.setMemberLevel/2.0",
+    bulkSave: "/wdcrm/trade.setMemberLevelWithSearchCondition/2.0",
+    verify: "/wdcrm/customer.summary.pc/1.0"
+  });
+  var DEFAULT_MEMBER_API_CONNECTION = Object.freeze({
+    baseUrl: MEMBER_API_BASE_URL,
+    catalogEndpoint: MEMBER_API_ENDPOINTS.catalog,
+    saveEndpoint: MEMBER_API_ENDPOINTS.save,
+    bulkSaveEndpoint: MEMBER_API_ENDPOINTS.bulkSave,
+    verifyEndpoint: MEMBER_API_ENDPOINTS.verify
+  });
+  var MEMBER_API_HEADERS = Object.freeze({
+    accept: "application/json, text/plain, */*"
+  });
+  var MEMBER_SAVE_ENDPOINT = resolveMemberApiUrl(DEFAULT_MEMBER_API_CONNECTION.baseUrl, DEFAULT_MEMBER_API_CONNECTION.saveEndpoint);
+  var MEMBER_SAVE_BODY_TEMPLATE = {
+    shopId: "<SHOP_ID>",
+    buyerIds: ["<BUYER_ID>"],
+    memberId: "<MEMBER_LEVEL_ID>",
+    selectedServerIndex: "<SELECTED_INDEX>",
+    selectedGradeName: "<SELECTED_GRADE_NAME>"
+  };
+  function createMemberSaveCurl(payload, connection = DEFAULT_MEMBER_API_CONNECTION) {
+    const saveUrl = resolveMemberApiUrl(connection.baseUrl, connection.saveEndpoint);
+    const param = JSON.stringify({
+      buyerIds: payload.buyerIds,
+      memberId: payload.memberId
+    });
+    return [
+      `curl --get ${shellQuote(saveUrl)}`,
+      `  --header ${shellQuote(`Accept: ${MEMBER_API_HEADERS.accept}`)}`,
+      `  --header ${shellQuote("Origin: https://h5.weidian.com")}`,
+      `  --header ${shellQuote(`Referer: https://h5.weidian.com/m/mkt-h5-member-detail/index?shopId=${payload.shopId}`)}`,
+      `  --cookie ${shellQuote("<CHROME_SESSION_COOKIE>")}`,
+      `  --data-urlencode ${shellQuote("_=<TIMESTAMP_MS>")}`,
+      `  --data-urlencode ${shellQuote(`param=${param}`)}`,
+      `  --data-urlencode ${shellQuote("wdtoken=<WDTOKEN>")}`
+    ].join(" \\\n");
+  }
+  var MEMBER_SAVE_CURL_TEMPLATE = createMemberSaveCurl(MEMBER_SAVE_BODY_TEMPLATE);
+  function resolveMemberApiUrl(baseUrl, endpoint) {
+    return new URL(endpoint, ensureTrailingSlash(baseUrl)).toString();
+  }
+  function ensureTrailingSlash(value) {
+    return value.endsWith("/") ? value : `${value}/`;
+  }
+  function shellQuote(value) {
+    return `'${value.replace(/'/g, `'"'"'`)}'`;
+  }
+
   // extension/src/member/member-action-adapter.ts
   var MEMBER_TOKEN_SOURCE = {
-    mode: "endpoint",
-    requestUrlPattern: "/api/member/action-token",
-    requestMethod: "POST",
-    tokenJsonPath: "actionToken",
-    expiresAtJsonPath: "expiresAtEpochMs",
+    mode: "page-observer",
+    requestUrlPattern: "wdtoken",
+    requestMethod: "GET",
+    tokenJsonPath: "wdtoken",
     credentials: "include",
-    requestHeaders: {},
+    requestHeaders: MEMBER_API_HEADERS,
     tokenPlacement: {
-      type: "body",
-      key: "actionToken"
+      type: "query",
+      key: "wdtoken"
     },
-    actionBinding: "per-action",
-    oneTime: true
+    actionBinding: "shared",
+    oneTime: false
   };
-  var DEFAULT_AUTHORIZED_MEMBER_CONFIG = {
-    mode: "mock-localhost",
-    baseUrl: "http://127.0.0.1:4173",
-    tokenSource: MEMBER_TOKEN_SOURCE,
-    stateSource: {
-      mode: "endpoint",
-      requestUrlPattern: "/api/member/context",
-      requestMethod: "POST",
-      credentials: "include",
-      requestHeaders: {}
-    },
-    writeEndpoint: {
-      status: "configured",
-      saveUrlPattern: "/api/member/save",
-      resetUrlPattern: "/api/member/reset",
-      requestMethod: "POST",
-      credentials: "include",
-      contentType: "application/json",
-      requestHeaders: {},
-      tokenPlacement: {
-        type: "body",
-        key: "actionToken"
+  function createMemberAnalysisConfig(connection = DEFAULT_MEMBER_API_CONNECTION) {
+    return {
+      baseUrl: connection.baseUrl,
+      tokenSource: MEMBER_TOKEN_SOURCE,
+      stateSource: {
+        mode: "page-context",
+        requestUrlPattern: connection.catalogEndpoint,
+        requestMethod: "GET",
+        credentials: "include",
+        requestHeaders: MEMBER_API_HEADERS
       },
-      memberBinding: "current-session-user",
-      shopIdField: "shopId",
-      targetIndexField: "targetIndex"
-    }
-  };
-  var LIVE_PAGE_MEMBER_CONFIG = {
-    mode: "live-weidian",
-    baseUrl: "",
-    tokenSource: {
-      mode: "page-observer",
-      requestUrlPattern: "",
-      requestMethod: "POST",
-      tokenJsonPath: "",
-      credentials: "include",
-      requestHeaders: {},
-      tokenPlacement: {
-        type: "body",
-        key: "actionToken"
-      },
-      actionBinding: "per-action",
-      oneTime: true
-    },
-    stateSource: {
-      mode: "page-context",
-      requestUrlPattern: "__CONFIGURE_MEMBER_STATE_ENDPOINT__",
-      requestMethod: "POST",
-      credentials: "include",
-      requestHeaders: {}
-    },
-    writeEndpoint: {
-      status: "not-configured",
-      saveUrlPattern: "__CONFIGURE_MEMBER_WRITE_ENDPOINT__",
-      resetUrlPattern: "__CONFIGURE_MEMBER_RESET_ENDPOINT__",
-      requestMethod: "POST",
-      credentials: "include",
-      contentType: "application/json",
-      requestHeaders: {},
-      tokenPlacement: {
-        type: "body",
-        key: "__CONFIGURE_ACTION_TOKEN_KEY__"
-      },
-      memberBinding: "explicit-member-id",
-      memberIdField: "__CONFIGURE_MEMBER_ID_FIELD__",
-      shopIdField: "__CONFIGURE_SHOP_ID_FIELD__",
-      targetIndexField: "__CONFIGURE_TARGET_INDEX_FIELD__"
-    }
-  };
+      writeEndpoint: {
+        saveUrlPattern: connection.saveEndpoint,
+        bulkSaveUrlPattern: connection.bulkSaveEndpoint,
+        verifyUrlPattern: connection.verifyEndpoint,
+        requestMethod: "GET",
+        credentials: "include",
+        requestHeaders: MEMBER_API_HEADERS,
+        tokenPlacement: {
+          type: "query",
+          key: "wdtoken"
+        },
+        memberBinding: "buyer-ids",
+        buyerIdsField: "buyerIds",
+        memberIdField: "memberId"
+      }
+    };
+  }
+  var DEFAULT_AUTHORIZED_MEMBER_CONFIG = createMemberAnalysisConfig();
+  var MEMBER_ANALYSIS_CONFIG = DEFAULT_AUTHORIZED_MEMBER_CONFIG;
   var AuthorizedMemberActionAdapter = class {
-    constructor(config = DEFAULT_AUTHORIZED_MEMBER_CONFIG, fetchImpl = fetch) {
+    constructor(config = DEFAULT_AUTHORIZED_MEMBER_CONFIG, fetchImpl = fetch, executeInMemberPage) {
       this.config = config;
       this.fetchImpl = fetchImpl;
+      this.executeInMemberPage = executeInMemberPage;
+    }
+    configureConnection(connection) {
+      this.config = createMemberAnalysisConfig(connection);
     }
     async detectContext(input) {
       validateContext(input);
@@ -421,163 +438,150 @@
     }
     getWriteConfigurationStatus() {
       try {
-        this.assertWriteConfigured("save-vip-settings");
+        this.validateWriteConfiguration("save-vip-settings");
         return { status: "configured" };
       } catch (error) {
-        const caught = error instanceof MemberActionError ? error : new MemberActionError("UNKNOWN_MEMBER_ERROR");
+        const caught = error instanceof MemberActionError ? error : new MemberActionError("MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED");
         return {
-          status: caught.code === "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED" ? "write-endpoint-not-configured" : caught.code === "PERMISSION_DENIED" ? "permission-denied" : "error",
+          status: "write-endpoint-not-configured",
           errorCode: caught.code,
           errorMessage: caught.message
         };
       }
     }
     validateWriteConfiguration(action) {
-      this.assertWriteConfigured(action);
-    }
-    async acquireActionToken(context, action) {
-      if (this.config.tokenSource.mode === "page-observer") {
+      if (action === "reset-vip-settings") {
         throw new MemberActionError(
-          "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-          "\uD398\uC774\uC9C0 \uAD00\uCC30\uD615 actionToken source\uB294 Chrome \uD398\uC774\uC9C0 \uAD00\uCC30\uAE30\uB97C \uD1B5\uD574 \uD68D\uB4DD\uD574\uC57C \uD569\uB2C8\uB2E4."
+          "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
+          "\uC2E4\uC81C \uD310\uB9E4\uC790 API\uC5D0\uB294 \uBCC4\uB3C4 reset endpoint\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBAA9\uD45C \uB4F1\uAE09\uC744 \uC120\uD0DD\uD574 \uC800\uC7A5\uD558\uC138\uC694."
         );
       }
-      this.assertTokenConfigured();
-      const payload = await this.requestJson(this.config.tokenSource.requestUrlPattern, {
-        method: this.config.tokenSource.requestMethod,
-        credentials: this.config.tokenSource.credentials,
-        headers: this.config.tokenSource.requestHeaders,
-        configurationError: "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-        body: {
-          shopId: context.shopId,
-          action,
-          sessionFingerprint: context.sessionFingerprint
-        }
-      });
-      const rawToken = readJsonPath(payload, this.config.tokenSource.tokenJsonPath);
-      if (typeof rawToken !== "string" || !rawToken.trim()) {
-        throw new MemberActionError("SERVER_RESPONSE_INVALID", "\uC2B9\uC778 \uC11C\uBC84 \uC751\uB2F5\uC5D0 actionToken\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", true);
+      const saveUrl = resolveConfiguredWeidianUrl(
+        this.config.baseUrl,
+        this.config.writeEndpoint.saveUrlPattern
+      );
+      if (!/\/wdcrm\/trade\.setMemberLevel\/2\.0$/i.test(saveUrl.pathname)) {
+        throw new MemberActionError(
+          "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
+          "\uAC1C\uBCC4 \uD68C\uC6D0 \uC800\uC7A5 endpoint\uAC00 trade.setMemberLevel/2.0 \uD615\uC2DD\uC774 \uC544\uB2D9\uB2C8\uB2E4."
+        );
       }
-      const issuedAtEpochMs = finiteNumber(payload.issuedAtEpochMs) ?? Date.now();
-      const expiresAtEpochMs = finiteNumber(readJsonPath(payload, this.config.tokenSource.expiresAtJsonPath)) ?? addExpiresIn(issuedAtEpochMs, readJsonPath(payload, this.config.tokenSource.expiresInJsonPath));
-      return {
-        rawToken,
-        issuedAtEpochMs,
-        expiresAtEpochMs,
-        oneTime: payload.oneTime === void 0 ? this.config.tokenSource.oneTime : Boolean(payload.oneTime),
-        source: "authorized-response"
-      };
+    }
+    async acquireActionToken(_context, _action) {
+      throw new MemberActionError(
+        "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
+        "wdtoken\uC740 \uB85C\uADF8\uC778\uB41C Chrome\uC758 \uC2E4\uC81C Weidian \uC694\uCCAD\uC5D0\uC11C \uC790\uB3D9 \uAC10\uC9C0\uD569\uB2C8\uB2E4."
+      );
     }
     async syncVipGrades(context) {
-      if (this.config.stateSource.mode === "page-context") {
-        return {
-          ...stateFromPageContext(context),
-          writeAdapter: this.getWriteConfigurationStatus()
-        };
-      }
-      this.assertStateConfigured();
-      const payload = await this.requestJson(this.config.stateSource.requestUrlPattern, {
-        method: this.config.stateSource.requestMethod,
-        credentials: this.config.stateSource.credentials,
-        headers: this.config.stateSource.requestHeaders,
-        configurationError: "MEMBER_STATE_ENDPOINT_NOT_CONFIGURED",
-        body: {
-          shopId: context.shopId,
-          sessionFingerprint: context.sessionFingerprint,
-          pageUrl: context.pageUrl
-        }
-      });
-      const gradeNames = Array.isArray(payload.gradeNames) ? payload.gradeNames.filter((name) => typeof name === "string" && Boolean(name.trim())).slice(0, 30) : [];
-      const gradeCount = finiteInteger(payload.gradeCount);
-      const serverIndex = finiteInteger(payload.serverIndex);
-      if (gradeCount === void 0 || gradeCount < 1 || serverIndex === void 0 || serverIndex < 0 || serverIndex >= gradeCount || gradeNames.length !== gradeCount) {
-        throw new MemberActionError("SERVER_RESPONSE_INVALID", "\uC2B9\uC778 \uC11C\uBC84\uC758 Member \uC0C1\uD0DC \uC751\uB2F5\uC774 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.", true);
-      }
       return {
-        shopId: context.shopId,
-        serverIndex,
-        gradeCount,
-        gradeNames,
-        name: typeof payload.name === "string" ? payload.name.slice(0, 80) : gradeNames[serverIndex],
-        remaining: finiteNumber(payload.remaining) ?? 0,
-        originalProgress: finiteNumber(payload.originalProgress) ?? 0,
-        syncedAtIso: (/* @__PURE__ */ new Date()).toISOString(),
-        readSource: "mock-endpoint",
-        actionToken: {
-          status: "empty",
-          shopId: context.shopId,
-          action: "save-vip-settings",
-          oneTime: true
-        },
+        ...stateFromPageContext(context),
         writeAdapter: this.getWriteConfigurationStatus()
       };
     }
-    async saveVipSettings(context, rawActionToken, payload) {
-      this.assertWriteConfigured("save-vip-settings");
-      return this.mutate(this.config.writeEndpoint.saveUrlPattern, context, rawActionToken, payload);
-    }
-    async resetVipSettings(context, rawActionToken, payload) {
-      this.assertWriteConfigured("reset-vip-settings");
-      return this.mutate(this.config.writeEndpoint.resetUrlPattern, context, rawActionToken, payload);
-    }
-    async mutate(pathname, context, rawActionToken, payload) {
-      const body = {
-        [this.config.writeEndpoint.shopIdField]: payload.shopId,
-        clientRequestId: payload.clientRequestId
-      };
-      if ("targetIndex" in payload) {
-        body[this.config.writeEndpoint.targetIndexField] = payload.targetIndex;
-        body.serverIndex = payload.serverIndex;
-        body.gradeCount = payload.gradeCount;
-        body.gradeNames = [...payload.gradeNames];
+    async saveVipSettings(context, rawWdToken, payload) {
+      this.validateWriteConfiguration("save-vip-settings");
+      const buyerIds = normalizeBuyerIds(payload.buyerIds);
+      const memberId = normalizeMemberId(payload.memberId);
+      const url = this.createGetUrl(
+        this.config.writeEndpoint.saveUrlPattern,
+        rawWdToken,
+        {
+          [this.config.writeEndpoint.buyerIdsField]: buyerIds,
+          [this.config.writeEndpoint.memberIdField]: memberId
+        }
+      );
+      const response = await this.requestJson(context, url);
+      const code = finiteInteger(response.status?.code);
+      const accepted = code === 0 && Number(response.result) === 0;
+      if (!accepted) {
+        return {
+          ok: false,
+          errorCode: code === 401 || code === 403 ? "PERMISSION_DENIED" : "NETWORK_ERROR",
+          errorMessage: typeof response.status?.message === "string" ? response.status.message.slice(0, 400) : "Weidian Member \uB4F1\uAE09 \uBCC0\uACBD \uC751\uB2F5\uC774 \uC131\uACF5 \uC870\uAC74\uACFC \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+        };
       }
-      const headers = {};
-      const query = new URLSearchParams();
-      const placement = this.config.writeEndpoint.tokenPlacement;
-      if (placement.type === "body") body[placement.key] = rawActionToken;
-      if (placement.type === "header") headers[placement.key] = rawActionToken;
-      if (placement.type === "query") query.set(placement.key, rawActionToken);
-      const response = await this.requestJson(`${pathname}${query.size ? `?${query}` : ""}`, {
-        method: this.config.writeEndpoint.requestMethod,
-        credentials: this.config.writeEndpoint.credentials,
-        body,
-        headers: {
-          ...this.config.writeEndpoint.requestHeaders,
-          ...headers
-        },
-        contentType: this.config.writeEndpoint.contentType,
-        configurationError: "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED"
-      });
+      const verified = await this.verifyMemberLevel(
+        context,
+        rawWdToken,
+        buyerIds[0],
+        memberId
+      ).catch(() => void 0);
+      if (verified === false) {
+        return {
+          ok: false,
+          errorCode: "SERVER_STATE_NOT_CHANGED",
+          errorMessage: "\uC800\uC7A5 \uD6C4 \uC7AC\uC870\uD68C\uD55C \uD68C\uC6D0 \uB4F1\uAE09\uC774 \uC120\uD0DD\uD55C \uB4F1\uAE09\uACFC \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+        };
+      }
       return {
-        ok: response.ok === true,
-        serverIndex: finiteInteger(response.serverIndex),
-        errorCode: typeof response.errorCode === "string" ? response.errorCode : void 0,
-        errorMessage: typeof response.errorMessage === "string" ? response.errorMessage.slice(0, 400) : void 0
+        ok: true,
+        serverIndex: payload.targetIndex,
+        verified: verified === true
       };
     }
-    async requestJson(pathname, input) {
-      const base = this.authorizedBaseUrl(input.configurationError);
-      const url = new URL(pathname, base);
+    async resetVipSettings(_context, _rawWdToken, _payload) {
+      this.validateWriteConfiguration("reset-vip-settings");
+      return { ok: false, errorCode: "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED" };
+    }
+    async verifyMemberLevel(context, rawWdToken, buyerId, expectedMemberId) {
+      const verifyUrl = resolveConfiguredWeidianUrl(
+        this.config.baseUrl,
+        this.config.writeEndpoint.verifyUrlPattern
+      );
+      const url = new URL(verifyUrl);
+      url.searchParams.set("_", String(Date.now()));
+      url.searchParams.set("param", JSON.stringify({
+        buyer_id: buyerId,
+        page_size: 2
+      }));
+      url.searchParams.set("wdtoken", rawWdToken);
+      const response = await this.requestJson(context, url);
+      if (finiteInteger(response.status?.code) !== 0) return void 0;
+      const detected = collectMemberLevelIds(response.result);
+      if (!detected.length) return void 0;
+      return detected.includes(expectedMemberId);
+    }
+    createGetUrl(pathname, rawWdToken, param) {
+      const url = resolveConfiguredWeidianUrl(this.config.baseUrl, pathname);
+      url.searchParams.set("_", String(Date.now()));
+      url.searchParams.set("param", JSON.stringify(param));
+      url.searchParams.set(this.config.writeEndpoint.tokenPlacement.key, rawWdToken);
+      return url;
+    }
+    async requestJson(context, url) {
+      if (this.executeInMemberPage) {
+        try {
+          return await this.executeInMemberPage({
+            context,
+            url: url.toString(),
+            method: "GET"
+          });
+        } catch (error) {
+          if (error instanceof MemberActionError) throw error;
+          throw new MemberActionError(
+            "NETWORK_ERROR",
+            error instanceof Error ? error.message : "\uD310\uB9E4\uC790 \uD398\uC774\uC9C0 \uC694\uCCAD \uC2E4\uD589\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.",
+            true
+          );
+        }
+      }
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5e3);
+      const timer = setTimeout(() => controller.abort(), 8e3);
       let response;
       try {
         response = await this.fetchImpl(url, {
-          method: input.method,
+          method: "GET",
           cache: "no-store",
-          credentials: input.credentials,
+          credentials: "include",
           signal: controller.signal,
-          headers: {
-            "content-type": input.contentType || "application/json",
-            ...input.headers || {}
-          },
-          body: input.method === "GET" ? void 0 : JSON.stringify(input.body || {})
+          headers: this.config.writeEndpoint.requestHeaders
         });
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-          throw new MemberActionError("NETWORK_TIMEOUT", "\uC2B9\uC778 Member \uC11C\uBC84 \uC694\uCCAD \uC2DC\uAC04\uC774 \uCD08\uACFC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.", true);
+          throw new MemberActionError("NETWORK_TIMEOUT", "Weidian Member \uC694\uCCAD \uC2DC\uAC04\uC774 \uCD08\uACFC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.", true);
         }
-        throw new MemberActionError("NETWORK_ERROR", "\uC2B9\uC778 Member \uC11C\uBC84\uC5D0 \uC5F0\uACB0\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", true);
+        throw new MemberActionError("NETWORK_ERROR", "Weidian Member API\uC5D0 \uC5F0\uACB0\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", true);
       } finally {
         clearTimeout(timer);
       }
@@ -585,64 +589,16 @@
       try {
         payload = await response.json();
       } catch {
-        throw new MemberActionError("SERVER_RESPONSE_INVALID", "\uC2B9\uC778 Member \uC11C\uBC84\uAC00 JSON\uC744 \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.", true);
+        throw new MemberActionError("SERVER_RESPONSE_INVALID", "Weidian API\uAC00 JSON\uC744 \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.", true);
       }
-      if (!response.ok || payload.ok === false) {
-        const code = normalizeServerErrorCode(payload.errorCode, response.status);
+      if (!response.ok) {
         throw new MemberActionError(
-          code,
-          typeof payload.errorMessage === "string" ? payload.errorMessage.slice(0, 400) : code,
+          normalizeServerErrorCode(payload.status?.code, response.status),
+          typeof payload.status?.message === "string" ? payload.status.message.slice(0, 400) : `HTTP ${response.status}`,
           true
         );
       }
       return payload;
-    }
-    assertTokenConfigured() {
-      if (this.config.tokenSource.mode === "not-configured" || this.config.tokenSource.mode === "page-observer" || this.config.mode === "not-configured" || !this.config.baseUrl || this.config.tokenSource.requestUrlPattern.startsWith("__CONFIGURE_")) {
-        throw new MemberActionError(
-          "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-          "\uC2B9\uC778\uB41C actionToken source\uAC00 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
-        );
-      }
-      this.authorizedBaseUrl("ACTION_TOKEN_SOURCE_NOT_CONFIGURED");
-    }
-    assertStateConfigured() {
-      if (this.config.stateSource.mode === "page-context") return;
-      if (this.config.writeEndpoint.status === "not-configured" || this.config.mode === "not-configured" || !this.config.baseUrl || !this.config.stateSource.requestUrlPattern || this.config.stateSource.requestUrlPattern.startsWith("__CONFIGURE_")) {
-        throw new MemberActionError(
-          "MEMBER_STATE_ENDPOINT_NOT_CONFIGURED",
-          "\uC800\uC7A5 \uACB0\uACFC\uB97C \uAC80\uC99D\uD560 \uC2B9\uC778 Member \uC870\uD68C endpoint\uAC00 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
-        );
-      }
-      this.authorizedBaseUrl("MEMBER_STATE_ENDPOINT_NOT_CONFIGURED");
-    }
-    assertWriteConfigured(action) {
-      const endpoint = action === "save-vip-settings" ? this.config.writeEndpoint.saveUrlPattern : this.config.writeEndpoint.resetUrlPattern;
-      const placementKey = this.config.writeEndpoint.tokenPlacement.key;
-      if (this.config.mode === "not-configured" || !this.config.baseUrl || !endpoint || endpoint.startsWith("__CONFIGURE_") || !placementKey || placementKey.startsWith("__CONFIGURE_") || !this.config.writeEndpoint.shopIdField || this.config.writeEndpoint.shopIdField.startsWith("__CONFIGURE_") || !this.config.writeEndpoint.targetIndexField || this.config.writeEndpoint.targetIndexField.startsWith("__CONFIGURE_") || this.config.writeEndpoint.memberBinding === "explicit-member-id" && (!this.config.writeEndpoint.memberIdField || this.config.writeEndpoint.memberIdField.startsWith("__CONFIGURE_"))) {
-        throw new MemberActionError(
-          "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
-          "\uC2B9\uC778\uB41C Member \uC4F0\uAE30 endpoint\uC640 \uC694\uCCAD \uACC4\uC57D\uC774 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
-        );
-      }
-      this.authorizedBaseUrl("MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED");
-    }
-    authorizedBaseUrl(configurationError) {
-      let url;
-      try {
-        url = new URL(this.config.baseUrl);
-      } catch {
-        throw new MemberActionError(configurationError);
-      }
-      const mockAllowed = this.config.mode === "mock-localhost" && url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.port === "4173";
-      const liveAllowed = this.config.mode === "live-weidian" && url.protocol === "https:" && /(^|\.)weidian\.com$/i.test(url.hostname);
-      if (!mockAllowed && !liveAllowed) {
-        throw new MemberActionError(
-          configurationError,
-          "Member \uC5B4\uB311\uD130 \uC2E4\uD589\uD658\uACBD\uACFC endpoint origin\uC774 \uC77C\uCE58\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
-        );
-      }
-      return url;
     }
   };
   function stateFromPageContext(context) {
@@ -661,12 +617,10 @@
         status: "empty",
         shopId: context.shopId,
         action: "save-vip-settings",
-        oneTime: true
+        oneTime: false
       },
       writeAdapter: {
-        status: "write-endpoint-not-configured",
-        errorCode: "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
-        errorMessage: "\uC2E4\uC81C Member \uC4F0\uAE30 endpoint\uC640 \uC694\uCCAD \uACC4\uC57D\uC774 \uC124\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
+        status: "configured"
       }
     };
   }
@@ -677,12 +631,54 @@
     if (!Array.isArray(context.gradeNames)) throw new MemberActionError("GRADE_NAMES_INVALID");
     if (context.gradeNames.length !== context.gradeCount) throw new MemberActionError("GRADE_CATALOG_MISMATCH");
   }
-  function readJsonPath(value, path) {
-    if (!path || path.startsWith("__CONFIGURE_")) return void 0;
-    return path.split(".").reduce((current, key) => {
-      if (!current || typeof current !== "object") return void 0;
-      return current[key];
-    }, value);
+  function resolveConfiguredWeidianUrl(baseUrl, endpoint) {
+    let url;
+    try {
+      url = new URL(resolveMemberApiUrl(baseUrl, endpoint));
+    } catch {
+      throw new MemberActionError("MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED");
+    }
+    if (url.protocol !== "https:" || !/(^|\.)weidian\.com$/i.test(url.hostname)) {
+      throw new MemberActionError(
+        "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
+        "Weidian HTTPS endpoint\uB9CC Member \uC4F0\uAE30\uC5D0 \uC0AC\uC6A9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+      );
+    }
+    return url;
+  }
+  function normalizeBuyerIds(value) {
+    if (!Array.isArray(value)) throw new MemberActionError("SERVER_RESPONSE_INVALID", "buyerIds\uAC00 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
+    const result = [...new Set(
+      value.map((item) => String(item || "").trim()).filter((item) => /^[A-Za-z0-9_-]{1,100}$/.test(item))
+    )].slice(0, 200);
+    if (!result.length) throw new MemberActionError("SERVER_RESPONSE_INVALID", "buyerIds\uAC00 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
+    return result;
+  }
+  function normalizeMemberId(value) {
+    const memberId = String(value || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(memberId)) {
+      throw new MemberActionError("SERVER_RESPONSE_INVALID", "\uC120\uD0DD\uD55C Member \uB4F1\uAE09 ID\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
+    }
+    return memberId;
+  }
+  function collectMemberLevelIds(value, depth = 0) {
+    if (!value || depth > 6) return [];
+    if (Array.isArray(value)) {
+      return [...new Set(value.flatMap((item) => collectMemberLevelIds(item, depth + 1)))];
+    }
+    if (typeof value !== "object") return [];
+    const record = value;
+    const result = [];
+    for (const [key, child] of Object.entries(record).slice(0, 200)) {
+      if (/^(?:level|memberId|member_id)$/i.test(key)) {
+        const candidate = String(child ?? "").trim();
+        if (/^[A-Za-z0-9_-]{1,100}$/.test(candidate)) result.push(candidate);
+      }
+      if (child && typeof child === "object") {
+        result.push(...collectMemberLevelIds(child, depth + 1));
+      }
+    }
+    return [...new Set(result)];
   }
   function finiteNumber(value) {
     const numeric = Number(value);
@@ -692,24 +688,11 @@
     const numeric = Number(value);
     return Number.isInteger(numeric) ? numeric : void 0;
   }
-  function addExpiresIn(issuedAtEpochMs, expiresIn) {
-    const seconds = finiteNumber(expiresIn);
-    return seconds === void 0 ? void 0 : issuedAtEpochMs + Math.max(0, seconds) * 1e3;
-  }
   function normalizeServerErrorCode(value, status) {
-    if (status === 401 || status === 403) return "PERMISSION_DENIED";
-    const known = /* @__PURE__ */ new Set([
-      "ACTION_TOKEN_EXPIRED",
-      "ACTION_TOKEN_INVALID",
-      "ACTION_TOKEN_ALREADY_USED",
-      "SESSION_CHANGED",
-      "SESSION_EXPIRED",
-      "SHOP_ID_MISMATCH",
-      "SERVER_INDEX_MISMATCH",
-      "PERMISSION_DENIED",
-      "SERVER_STATE_NOT_CHANGED"
-    ]);
-    return typeof value === "string" && known.has(value) ? value : "NETWORK_ERROR";
+    if (status === 401 || status === 403 || Number(value) === 401 || Number(value) === 403) {
+      return "PERMISSION_DENIED";
+    }
+    return "NETWORK_ERROR";
   }
 
   // extension/src/member/member-context.ts
@@ -869,12 +852,23 @@
       let mutationError;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          await this.performMutation(
+          const mutation = await this.performMutation(
             effectiveContext,
             "save-vip-settings",
             (rawToken) => this.adapter.saveVipSettings(effectiveContext, rawToken, payload)
           );
           mutationError = void 0;
+          if (mutation.serverIndex === target) {
+            const state = {
+              ...before,
+              serverIndex: target,
+              name: payload.name,
+              syncedAtIso: new Date(this.now()).toISOString(),
+              actionToken: this.tokenManager.getStatus(effectiveContext, "save-vip-settings")
+            };
+            this.states.set(context.shopId, state);
+            return state;
+          }
         } catch (error) {
           mutationError = toMemberActionError(error);
         }
@@ -947,6 +941,7 @@
             true
           );
         }
+        return result;
       } catch (error) {
         const caught = toMemberActionError(error);
         if (caught.requestStarted) {
@@ -1004,6 +999,12 @@
     if (!value || typeof value !== "object") throw new MemberActionError("SERVER_RESPONSE_INVALID");
     const payload = value;
     if (!payload.shopId) throw new MemberActionError("SHOP_ID_MISSING");
+    if (!Array.isArray(payload.buyerIds) || payload.buyerIds.length === 0) {
+      throw new MemberActionError("SERVER_RESPONSE_INVALID", "buyerIds\uAC00 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
+    }
+    if (!payload.memberId || typeof payload.memberId !== "string") {
+      throw new MemberActionError("SERVER_RESPONSE_INVALID", "Member \uB4F1\uAE09 ID\uAC00 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
+    }
     if (!Number.isInteger(payload.serverIndex)) throw new MemberActionError("SERVER_INDEX_INVALID");
     if (!Number.isInteger(payload.targetIndex)) throw new MemberActionError("TARGET_INDEX_INVALID");
     if (payload.targetIndex < 0 || payload.targetIndex >= Number(payload.gradeCount)) {
@@ -1015,6 +1016,8 @@
     if (!payload.targetPageUrl) throw new MemberActionError("TARGET_PAGE_URL_MISSING");
     return {
       shopId: payload.shopId,
+      buyerIds: payload.buyerIds.map(String),
+      memberId: payload.memberId,
       serverIndex: payload.serverIndex,
       targetIndex: payload.targetIndex,
       gradeCount: payload.gradeCount,
@@ -1109,7 +1112,7 @@
       if (this.pending.has(key)) {
         throw new MemberActionError(
           "ACTION_TOKEN_ALREADY_ACQUIRING",
-          "\uB3D9\uC77C\uD55C Member \uCEE8\uD14D\uC2A4\uD2B8\uC5D0\uC11C actionToken \uAC10\uC9C0\uAC00 \uC774\uBBF8 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4."
+          "\uB3D9\uC77C\uD55C Member \uCEE8\uD14D\uC2A4\uD2B8\uC5D0\uC11C wdtoken \uAC10\uC9C0\uAC00 \uC774\uBBF8 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4."
         );
       }
       return new Promise((resolve, reject) => {
@@ -1117,7 +1120,7 @@
           this.pending.delete(key);
           reject(new MemberActionError(
             "ACTION_TOKEN_NOT_FOUND",
-            "\uC2E4\uC81C Weidian Member \uD398\uC774\uC9C0\uC758 bootstrap\xB7\uC694\uCCAD\xB7\uC751\uB2F5\uC5D0\uC11C actionToken\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
+            "\uB85C\uADF8\uC778\uB41C Chrome\uC758 Weidian \uC694\uCCAD\uC5D0\uC11C wdtoken\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
           ));
         }, this.timeoutMs);
         this.pending.set(key, { resolve, reject, timer });
@@ -1175,9 +1178,16 @@
   var memberLevelCache = /* @__PURE__ */ new Map();
   var memberLevelJobs = /* @__PURE__ */ new Map();
   var memberRequestContracts = /* @__PURE__ */ new Map();
+  var observedWdTokens = /* @__PURE__ */ new Map();
+  var latestSellerMemberLevels = null;
   var memberRequestObservationCount = 0;
-  var MAX_MEMBER_REQUEST_OBSERVATIONS = 200;
-  var memberAdapter = new AuthorizedMemberActionAdapter(LIVE_PAGE_MEMBER_CONFIG);
+  var memberApiConnectionFingerprint = "";
+  var MAX_MEMBER_REQUEST_OBSERVATIONS = 500;
+  var memberAdapter = new AuthorizedMemberActionAdapter(
+    MEMBER_ANALYSIS_CONFIG,
+    fetch,
+    executeMemberRequestInSellerPage
+  );
   var pageTokenSource = new PageObservedActionTokenSource(requestMemberActionTokenScan);
   var actionTokenManager = new InMemoryActionTokenManager(
     (context, action) => pageTokenSource.acquire(context, action),
@@ -1188,12 +1198,16 @@
   installMemberApiContractObserver();
   function installMemberApiContractObserver() {
     if (!chrome.webRequest?.onBeforeRequest) return;
-    const filter = { urls: ["https://thor.weidian.com/*"] };
+    const filter = {
+      urls: ["https://weidian.com/*", "https://*.weidian.com/*"],
+      types: ["xmlhttprequest", "other"]
+    };
     chrome.webRequest.onBeforeRequest.addListener(
       (details) => {
-        if (!isMemberApiUrl(details.url) || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) {
+        if (!isCandidateWeidianApiUrl(details.url) || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) {
           return;
         }
+        captureObservedWdToken(details);
         const describedUrl = describeContractUrl(details.url);
         memberRequestContracts.set(details.requestId, {
           observerVersion: 1,
@@ -1252,10 +1266,55 @@
       filter
     );
   }
-  function isMemberApiUrl(rawUrl) {
+  function captureObservedWdToken(details) {
+    try {
+      const url = new URL(details.url);
+      const rawToken = String(url.searchParams.get("wdtoken") || "").trim();
+      if (!rawToken || rawToken.length > 4096 || !Number.isInteger(details.tabId) || details.tabId < 0) {
+        return;
+      }
+      observedWdTokens.set(details.tabId, {
+        rawToken,
+        tabId: details.tabId,
+        observedAtEpochMs: Date.now(),
+        sourceUrl: `${url.origin}${url.pathname}`
+      });
+      trimObservedWdTokens();
+    } catch {
+    }
+  }
+  function trimObservedWdTokens() {
+    const cutoff = Date.now() - 30 * 6e4;
+    for (const [tabId, token] of observedWdTokens) {
+      if (token.observedAtEpochMs < cutoff) observedWdTokens.delete(tabId);
+    }
+  }
+  function latestObservedWdToken() {
+    trimObservedWdTokens();
+    return [...observedWdTokens.values()].sort((left, right) => right.observedAtEpochMs - left.observedAtEpochMs)[0];
+  }
+  function isCandidateWeidianApiUrl(rawUrl) {
     try {
       const url = new URL(rawUrl);
-      return url.hostname === "thor.weidian.com" && /\/(?:promotion|wdcrm)\//i.test(url.pathname) && /(?:member|customer|material|shopIdentity)/i.test(url.pathname);
+      return /(^|\.)weidian\.com$/i.test(url.hostname) && (url.hostname === "thor.weidian.com" || /\/\d+\.\d+(?:\/|$)/.test(url.pathname) || /(?:api|member|customer|grade|vip|shopidentity)/i.test(url.pathname));
+    } catch {
+      return false;
+    }
+  }
+  function isLikelyMemberApiUrl(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      return /(^|\.)weidian\.com$/i.test(url.hostname) && /(?:member|customer|grade|vip|shopidentity|identitycenter|wdcrm)/i.test(
+        `${url.hostname}${url.pathname}`
+      );
+    } catch {
+      return false;
+    }
+  }
+  function isMemberPageUrl(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      return /(^|\.)weidian\.com$/i.test(url.hostname) && /\/m\/mkt-h5-member-detail\/index(?:\.html)?\/?$/i.test(url.pathname);
     } catch {
       return false;
     }
@@ -1363,7 +1422,7 @@
     return String(value || "").split(";")[0].trim().toLowerCase().slice(0, 100);
   }
   function detectContractTokenPlacement(queryKeys, headerNames, bodyShape, queryShape) {
-    const isActionTokenKey = (key) => /^(?:x-)?action[-_]?token$/i.test(String(key));
+    const isActionTokenKey = (key) => /^(?:(?:x-)?action[-_]?token|wdtoken)$/i.test(String(key));
     if (queryKeys.some(isActionTokenKey) || containsContractShapeKey(queryShape, isActionTokenKey)) return "query";
     if (headerNames.some(isActionTokenKey)) return "header";
     if (containsContractShapeKey(bodyShape, isActionTokenKey)) return "body";
@@ -1378,7 +1437,6 @@
     const contract = memberRequestContracts.get(requestId);
     memberRequestContracts.delete(requestId);
     if (!contract || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) return;
-    memberRequestObservationCount += 1;
     const tabId = contract.tabId;
     delete contract.tabId;
     if (!Number.isInteger(tabId) || tabId < 0) return;
@@ -1387,6 +1445,45 @@
       observation: contract
     }).catch(() => {
     });
+    void publishMemberRequestContract(tabId, contract);
+  }
+  async function publishMemberRequestContract(tabId, observation) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const pageUrl = String(tab.url || "");
+      if (!isMemberPageUrl(pageUrl) && !isLikelyMemberApiUrl(observation.url)) return;
+      const page = safeMemberPage(pageUrl);
+      const shopId = memberShopIdFromPage(pageUrl);
+      await bridgeFetch("/api/member-api-contract", {
+        method: "POST",
+        body: JSON.stringify({
+          source: observation.source === "page-main" ? "page-main" : "chrome-web-request",
+          pageUrl: page,
+          shopId,
+          observation
+        })
+      });
+      memberRequestObservationCount += 1;
+    } catch {
+    }
+  }
+  function safeMemberPage(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      if (!/(^|\.)weidian\.com$/i.test(url.hostname)) return void 0;
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return void 0;
+    }
+  }
+  function memberShopIdFromPage(rawUrl) {
+    try {
+      const url = new URL(rawUrl);
+      const shopId = url.searchParams.get("shopId") || url.searchParams.get("shopid");
+      return /^\d{6,20}$/.test(String(shopId || "")) ? shopId : void 0;
+    } catch {
+      return void 0;
+    }
   }
   function trimMemberRequestContracts() {
     if (memberRequestContracts.size <= 250) return;
@@ -1406,13 +1503,23 @@
     return response.json();
   }
   async function requestMemberActionTokenScan(context, action) {
+    const observedWdToken = latestObservedWdToken();
+    if (observedWdToken) {
+      pageTokenSource.accept(context, action, {
+        rawToken: observedWdToken.rawToken,
+        issuedAtEpochMs: observedWdToken.observedAtEpochMs,
+        oneTime: false,
+        source: "network-request"
+      });
+      return;
+    }
     const tabEntry = [...tabContexts.entries()].find(
       ([, candidate]) => candidate.shopId === context.shopId && candidate.sessionFingerprint === context.sessionFingerprint
     );
     if (!tabEntry) {
       throw memberCommandError(
         "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-        "\uD604\uC7AC \uB85C\uADF8\uC778 \uC138\uC158\uACFC \uC0C1\uC810\uC5D0 \uC5F0\uACB0\uB41C Member \uD0ED\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
+        "\uD604\uC7AC Chrome \uC138\uC158\uC5D0\uC11C wdtoken\uC774 \uD3EC\uD568\uB41C Weidian \uC694\uCCAD\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
       );
     }
     const [tabId] = tabEntry;
@@ -1426,15 +1533,58 @@
     } catch {
       throw memberCommandError(
         "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-        "Member \uD398\uC774\uC9C0\uC758 actionToken \uAD00\uCC30\uAE30\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
+        "Weidian \uD398\uC774\uC9C0\uC758 wdtoken \uAD00\uCC30\uAE30\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
       );
     }
     if (!result?.ok) {
       throw memberCommandError(
         result?.errorCode || "ACTION_TOKEN_SOURCE_NOT_CONFIGURED",
-        result?.errorMessage || "Member \uD398\uC774\uC9C0\uC758 actionToken \uAD00\uCC30\uAE30\uB97C \uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
+        result?.errorMessage || "Weidian \uD398\uC774\uC9C0\uC758 wdtoken \uAD00\uCC30\uAE30\uB97C \uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4."
       );
     }
+  }
+  async function executeMemberRequestInSellerPage(request) {
+    const url = new URL(String(request.url || ""));
+    if (request.method !== "GET" || url.protocol !== "https:" || url.hostname !== "thor.weidian.com" || ![
+      "/wdcrm/trade.setMemberLevel/2.0",
+      "/wdcrm/customer.summary.pc/1.0"
+    ].includes(url.pathname)) {
+      throw memberCommandError(
+        "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED",
+        "\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uC740 Weidian Member endpoint\uC785\uB2C8\uB2E4."
+      );
+    }
+    const rawWdToken = String(url.searchParams.get("wdtoken") || "");
+    const tokenRecord = [...observedWdTokens.values()].filter((record) => record.rawToken === rawWdToken).sort((left, right) => right.observedAtEpochMs - left.observedAtEpochMs)[0] || latestObservedWdToken();
+    if (!tokenRecord) {
+      throw memberCommandError(
+        "ACTION_TOKEN_NOT_FOUND",
+        "\uD310\uB9E4\uC790 \uD398\uC774\uC9C0 \uC694\uCCAD\uC5D0\uC11C wdtoken\uC744 \uBA3C\uC800 \uAC10\uC9C0\uD574\uC57C \uD569\uB2C8\uB2E4."
+      );
+    }
+    let result;
+    try {
+      result = await chrome.tabs.sendMessage(tokenRecord.tabId, {
+        type: "EW_EXECUTE_MEMBER_PAGE_REQUEST",
+        request: {
+          method: "GET",
+          url: url.toString()
+        },
+        requestId: crypto.randomUUID()
+      });
+    } catch {
+      throw memberCommandError(
+        "TARGET_PAGE_MISMATCH",
+        "wdtoken\uC744 \uAC10\uC9C0\uD55C \uD310\uB9E4\uC790 \uD0ED\uC5D0\uC11C Member \uC694\uCCAD\uC744 \uC2E4\uD589\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
+      );
+    }
+    if (!result?.ok || !result.payload || typeof result.payload !== "object") {
+      throw memberCommandError(
+        result?.errorCode || "NETWORK_ERROR",
+        result?.errorMessage || "\uD310\uB9E4\uC790 \uD398\uC774\uC9C0\uC758 Member \uC694\uCCAD\uC774 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."
+      );
+    }
+    return result.payload;
   }
   function publishActionTokenState(context, actionToken) {
     const safeMeta = {
@@ -1467,12 +1617,23 @@
     pollInFlight = true;
     try {
       const state = await bridgeFetch("/api/state");
+      applyMemberApiConnection(state?.context?.memberApi);
       deliverStateToPorts(state);
       const delivered = await deliverStateToTabsWithoutPorts(state);
       if (delivered.size > 0) await ackCommands([...delivered]);
     } catch {
     } finally {
       pollInFlight = false;
+    }
+  }
+  function applyMemberApiConnection(connection) {
+    if (!connection || typeof connection !== "object") return;
+    const fingerprint = JSON.stringify(connection);
+    if (fingerprint === memberApiConnectionFingerprint) return;
+    try {
+      memberAdapter.configureConnection(connection);
+      memberApiConnectionFingerprint = fingerprint;
+    } catch {
     }
   }
   async function deliverStateToTabsWithoutPorts(state) {
@@ -1521,6 +1682,8 @@
   chrome.runtime.onInstalled.addListener(() => {
     pageTokenSource.clearAll();
     actionTokenManager.clearAll();
+    observedWdTokens.clear();
+    latestSellerMemberLevels = null;
     tabContexts.clear();
     chrome.alarms.create("ew-weidian-heartbeat", { delayInMinutes: 0, periodInMinutes: 0.5 });
     void pollBridge();
@@ -1528,6 +1691,8 @@
   chrome.runtime.onStartup.addListener(() => {
     pageTokenSource.clearAll();
     actionTokenManager.clearAll();
+    observedWdTokens.clear();
+    latestSellerMemberLevels = null;
     chrome.alarms.create("ew-weidian-heartbeat", { delayInMinutes: 0, periodInMinutes: 0.5 });
     void pollBridge();
   });
@@ -1549,6 +1714,31 @@
     });
   });
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === "EW_SELLER_MEMBER_CATALOG_OBSERVED") {
+      const memberLevels = normalizeSellerMemberLevels(message.memberLevels);
+      if (memberLevels.length) {
+        latestSellerMemberLevels = {
+          observedAtEpochMs: Date.now(),
+          memberLevels
+        };
+        sendResponse({ ok: true, count: memberLevels.length });
+      } else {
+        sendResponse({ ok: false, count: 0 });
+      }
+      return false;
+    }
+    if (message?.type === "EW_MEMBER_API_CONTRACT_OBSERVED" && message.observation) {
+      const tabId = sender.tab?.id;
+      if (!Number.isInteger(tabId) || tabId < 0) {
+        sendResponse({ ok: false });
+        return false;
+      }
+      void publishMemberRequestContract(tabId, {
+        ...message.observation,
+        source: "page-main"
+      }).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
     if (message?.type === "EW_OBSERVATION") {
       if (sender.tab && !sender.tab.active) {
         sendResponse({ ok: true, ignored: "inactive-tab" });
@@ -1614,7 +1804,7 @@
         urls.map(
           (url, index) => chrome.downloads.download({
             url,
-            filename: `\uB178\uBB34\uD604/${folder}/${String(index + 1).padStart(3, "0")}-${fileNameFromUrl(url)}`,
+            filename: `weidian/${folder}/${String(index + 1).padStart(3, "0")}-${fileNameFromUrl(url)}`,
             conflictAction: "uniquify",
             saveAs: false
           })
@@ -1690,7 +1880,7 @@
     if (!rawToken || rawToken.length > 4096) {
       throw memberCommandError("ACTION_TOKEN_MISSING");
     }
-    if (detection.source === "network-request") {
+    if (detection.source === "network-request" && detection.oneTime !== false) {
       return {
         status: "consumed",
         shopId,
@@ -1732,7 +1922,7 @@
       issuedAtEpochMs: finiteEpochOrNow(detection.issuedAtEpochMs),
       expiresAtEpochMs: finiteEpoch(detection.expiresAtEpochMs),
       oneTime: detection.oneTime !== false,
-      source: detection.source === "page-bootstrap" ? "page-bootstrap" : "network-response"
+      source: detection.source === "page-bootstrap" ? "page-bootstrap" : detection.source === "network-request" ? "network-request" : "network-response"
     };
     if (pageTokenSource.accept(context, action, acquired)) {
       return {
@@ -1791,6 +1981,8 @@
     pageTokenSource.clearAll();
     actionTokenManager.clearAll();
     tabContexts.clear();
+    observedWdTokens.clear();
+    latestSellerMemberLevels = null;
   });
   function clearTabContext(tabId) {
     const previous = tabContexts.get(tabId);
@@ -1800,6 +1992,7 @@
     if (previous.shopId) memberCommandHandler.clearShop(previous.shopId);
     tabContexts.delete(tabId);
     tabActionIntents.delete(tabId);
+    observedWdTokens.delete(tabId);
   }
   async function fingerprintChromeSession(context) {
     let url;
@@ -1833,11 +2026,14 @@ ${ephemeralCookieMaterial}`
   }
   function sanitizeErrorMessage(message) {
     return String(message).replace(
-      /\b(actionToken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
+      /\b(actionToken|wdtoken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
       "$1=[REDACTED]"
     ).slice(0, 400);
   }
   async function discoverMemberLevels(shopId) {
+    if (latestSellerMemberLevels && Date.now() - latestSellerMemberLevels.observedAtEpochMs < 10 * 6e4) {
+      return latestSellerMemberLevels.memberLevels;
+    }
     const cached = memberLevelCache.get(shopId);
     if (cached && Date.now() - cached.savedAt < 10 * 6e4) return cached.memberLevels;
     if (memberLevelJobs.has(shopId)) return memberLevelJobs.get(shopId);
@@ -1857,6 +2053,24 @@ ${ephemeralCookieMaterial}`
     })();
     memberLevelJobs.set(shopId, job);
     return job;
+  }
+  function normalizeSellerMemberLevels(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    return value.flatMap((item, index) => {
+      if (!item || typeof item !== "object") return [];
+      const id = String(item.id || "").trim();
+      const label = String(item.label || "").trim().slice(0, 80);
+      if (!id || !label || !/^[A-Za-z0-9_-]{1,100}$/.test(id) || seen.has(id)) return [];
+      seen.add(id);
+      const rankValue = Number(item.rank);
+      return [{
+        id,
+        label,
+        rank: Number.isInteger(rankValue) && rankValue > 0 ? rankValue : index + 1,
+        rawText: "Weidian seller member catalog"
+      }];
+    }).slice(0, 30);
   }
   async function collectMemberLevelsFromTab(tabId) {
     for (let attempt = 0; attempt < 24; attempt += 1) {

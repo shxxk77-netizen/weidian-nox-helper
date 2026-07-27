@@ -46,6 +46,32 @@
     if (event.source !== window || event.origin !== location.origin) return;
     const message = event.data;
     if (
+      message?.source === 'EW_WEIDIAN_PAGE_MAIN' &&
+      message.type === 'EW_MEMBER_API_CONTRACT' &&
+      message.observation
+    ) {
+      chrome.runtime.sendMessage({
+        type: 'EW_MEMBER_API_CONTRACT_OBSERVED',
+        observation: message.observation
+      }, () => void chrome.runtime.lastError);
+      return;
+    }
+    if (
+      message?.source === 'EW_WEIDIAN_PAGE_MAIN' &&
+      message.type === 'EW_SELLER_MEMBER_CATALOG' &&
+      Array.isArray(message.memberLevels)
+    ) {
+      chrome.runtime.sendMessage({
+        type: 'EW_SELLER_MEMBER_CATALOG_OBSERVED',
+        memberLevels: message.memberLevels
+      }, () => void chrome.runtime.lastError);
+      state.discoveredMemberLevels = message.memberLevels;
+      state.snapshot = collectSnapshot();
+      render();
+      postObservation();
+      return;
+    }
+    if (
       message?.source !== 'EW_WEIDIAN_PAGE_MAIN' ||
       message.type !== 'EW_MEMBER_ACTION_TOKEN_DETECTED' ||
       !message.context ||
@@ -61,6 +87,16 @@
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'EW_EXECUTE_MEMBER_PAGE_REQUEST') {
+      requestPageMainApiCall(message.request, message.requestId || crypto.randomUUID())
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({
+          ok: false,
+          errorCode: error?.code || 'NETWORK_ERROR',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }));
+      return true;
+    }
     if (message?.type === 'EW_MEMBER_ACTION_TOKEN_STATE' && message.actionToken) {
       if (
         state.memberServerState &&
@@ -230,6 +266,7 @@
     const bodyText = visibleText(document.body).slice(0, 80_000);
     const itemId = url.searchParams.get('itemID') || url.searchParams.get('itemId') || matchFirst(bodyText, /itemID\s*[:：]?\s*(\d{6,})/i);
     const shopId = detectShopId(url, bodyText);
+    const buyerIds = detectBuyerIds(url);
     if (state.memberServerState?.shopId && state.memberServerState.shopId !== shopId) {
       state.memberServerState = null;
     }
@@ -256,7 +293,9 @@
     const synchronizedMemberLevels =
       state.memberServerState?.shopId === shopId
         ? state.memberServerState.gradeNames.map((label, index) => ({
-            id: `server-level-${index}`,
+            id:
+              state.discoveredMemberLevels.find((level) => level.label === label)?.id ||
+              `server-level-${index}`,
             label,
             rank: index + 1,
             rawText: `Weidian Member API serverIndex=${index}`
@@ -280,6 +319,7 @@
       observedAtIso: new Date().toISOString(),
       itemId: itemId || undefined,
       shopId: shopId || undefined,
+      buyerIds,
       shopName: shopName || undefined,
       productTitle: title,
       priceText: priceText ? (/^[0-9]/.test(priceText) ? `¥${priceText}` : priceText) : undefined,
@@ -310,9 +350,27 @@
     return matchFirst(bodyText, /(?:店铺|상점|shop)\s*(?:ID)?\s*[:：]?\s*(\d{6,})/i);
   }
 
+  function detectBuyerIds(url) {
+    const values = [
+      url.searchParams.get('buyerId'),
+      url.searchParams.get('buyer_id'),
+      url.hash.match(/\/customer(?:Chain)?Detail\/([^/?#]+)/i)?.[1],
+      url.hash.match(/\/customer\/detail\/([^/?#]+)/i)?.[1]
+    ]
+      .map((value) => {
+        try {
+          return decodeURIComponent(String(value || '')).trim();
+        } catch {
+          return String(value || '').trim();
+        }
+      })
+      .filter((value) => /^[A-Za-z0-9_-]{1,100}$/.test(value));
+    return [...new Set(values)].slice(0, 200);
+  }
+
   function requestMemberLevelDiscovery() {
     const shopId = state.snapshot?.shopId;
-    if (!shopId || state.snapshot.memberLevels.length > 0) return;
+    if (!shopId || state.discoveredMemberLevels.length > 0) return;
     const now = Date.now();
     if (state.memberDiscoveryShopId === shopId && now - state.memberDiscoveryRequestedAt < 30_000) return;
     state.memberDiscoveryShopId = shopId;
@@ -486,7 +544,13 @@
   }
 
   function detectPageKind(url, bodyText, itemId) {
-    if (/d\.weidian\.com$/i.test(url.hostname) || /手机收银台|扫码.*支付|payment/i.test(bodyText)) return 'payment';
+    if (
+      /d\.weidian\.com$/i.test(url.hostname) &&
+      /(?:pc-vue-customer|mkt-pc-member|customer)/i.test(`${url.pathname}${url.hash}`)
+    ) {
+      return 'member';
+    }
+    if (/手机收银台|扫码.*支付|payment/i.test(bodyText)) return 'payment';
     if (/确认订单|提交订单|Confirm Order|Submit Order/i.test(bodyText)) return 'checkout';
     if (itemId || /Buy Now|立即购买|Add to Cart/i.test(bodyText)) return 'product';
     if (/会员|VIP[1-6]|member/i.test(bodyText)) return 'member';
@@ -585,6 +649,7 @@
     if (
       !snapshot ||
       snapshot.pageKind !== 'member' ||
+      !/mkt-h5-member-detail/i.test(location.pathname) ||
       !snapshot.shopId ||
       state.memberCommandRunning ||
       state.memberServerState?.shopId === snapshot.shopId
@@ -764,6 +829,42 @@
         source: 'EW_WEIDIAN_CONTENT',
         type,
         requestId
+      }, location.origin);
+    });
+  }
+
+  function requestPageMainApiCall(request, requestId) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('판매자 페이지 API 응답 시간이 초과되었습니다.'));
+      }, 10_000);
+      function onMessage(event) {
+        if (event.source !== window || event.origin !== location.origin) return;
+        const message = event.data;
+        if (
+          message?.source !== 'EW_WEIDIAN_PAGE_MAIN' ||
+          message.requestId !== requestId ||
+          message.type !== 'EW_MEMBER_PAGE_REQUEST_RESULT'
+        ) {
+          return;
+        }
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        if (message.ok && message.payload && typeof message.payload === 'object') {
+          resolve(message.payload);
+        } else {
+          const error = new Error(message.errorMessage || '판매자 페이지 API 요청이 실패했습니다.');
+          error.code = message.errorCode || 'NETWORK_ERROR';
+          reject(error);
+        }
+      }
+      window.addEventListener('message', onMessage);
+      window.postMessage({
+        source: 'EW_WEIDIAN_CONTENT',
+        type: 'EW_EXECUTE_MEMBER_PAGE_REQUEST',
+        requestId,
+        request
       }, location.origin);
     });
   }
@@ -966,7 +1067,7 @@
     }
     if (!watermark.isConnected) document.documentElement.appendChild(watermark);
     watermark.style.display = 'block';
-    watermark.textContent = Array(40).fill(config.text || '노무현').join('   ');
+    watermark.textContent = Array(40).fill(config.text || 'weidian').join('   ');
   }
 
   function downloadImages(urls) {
@@ -1115,7 +1216,7 @@
     const normalized = normalizeMemberPreview(preview);
     memberPreviewCard.style.display = 'grid';
     memberPreviewCard.innerHTML = `
-      <div class="ew-member-card-title">노무현 회원 등급 미리보기</div>
+      <div class="ew-member-card-title">weidian 회원 등급 미리보기</div>
       <div class="ew-member-card-rank">${escapeHtml(normalized.levelLabel)}</div>
       <div class="ew-member-card-name">${escapeHtml(normalized.name)}</div>
       <div class="ew-member-card-next">다음 등급까지 ${escapeHtml(String(normalized.nextValue))}</div>
@@ -1130,7 +1231,7 @@
     const options = snapshot.options || [];
     panel.innerHTML = `
       <header>
-        <strong><span class="logo">店</span> 노무현</strong>
+        <strong><span class="logo">店</span> weidian</strong>
         <div class="header-actions">
           <span class="chip ${bridgeConnected ? 'ok' : ''}">${bridgeConnected ? '연결됨' : '앱 대기'}</span>
           <button data-action="close">−</button>
@@ -1218,14 +1319,14 @@
     const token = server?.actionToken;
     const writeAdapter = server?.writeAdapter;
     return `
-      <div class="safe">실제 Member 읽기와 actionToken 관찰은 활성화되어 있습니다. 쓰기 endpoint가 없으면 저장 단계만 차단됩니다.</div>
+      <div class="safe">실제 Member 읽기와 판매자 요청의 wdtoken 관찰이 활성화되어 있습니다.</div>
       <p class="muted">현재 상점에서 사용할 등급 ${levels.length}개를 표시합니다.</p>
       ${server ? `
         <div class="reservation">
           <span>승인 Member 상태</span>
           <b>${escapeHtml(server.name)} · serverIndex ${server.serverIndex}</b>
           <small>${escapeHtml(server.readSource || 'weidian-page')} · gradeNames ${escapeHtml(server.gradeNames.join(', '))}</small>
-          <small>actionToken ${escapeHtml(token?.status || 'empty')} · fingerprint ${escapeHtml(token?.tokenFingerprint || '-')}</small>
+          <small>wdtoken ${escapeHtml(token?.status || 'empty')} · fingerprint ${escapeHtml(token?.tokenFingerprint || '-')}</small>
           <small>쓰기 API ${escapeHtml(writeAdapter?.errorCode || writeAdapter?.status || 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED')}</small>
         </div>
       ` : ''}
@@ -1245,7 +1346,7 @@
   }
 
   function renderWatermark() {
-    const config = state.bridge?.context?.watermark || { enabled: false, text: '노무현' };
+    const config = state.bridge?.context?.watermark || { enabled: false, text: 'weidian' };
     return `
       <h2>워터마크</h2>
       <p class="muted">데스크톱 앱에서 설정합니다.</p>
@@ -1348,7 +1449,7 @@
   function sanitizeConsoleMessage(value) {
     return String(value || '')
       .replace(
-        /\b(actionToken|accessToken|refreshToken|cookie|authorization|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
+        /\b(actionToken|wdtoken|accessToken|refreshToken|cookie|authorization|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
         '$1=[REDACTED]'
       )
       .slice(0, 400);

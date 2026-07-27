@@ -43,6 +43,24 @@
     window.addEventListener("message", (event) => {
       if (event.source !== window || event.origin !== location.origin) return;
       const message = event.data;
+      if (message?.source === "EW_WEIDIAN_PAGE_MAIN" && message.type === "EW_MEMBER_API_CONTRACT" && message.observation) {
+        chrome.runtime.sendMessage({
+          type: "EW_MEMBER_API_CONTRACT_OBSERVED",
+          observation: message.observation
+        }, () => void chrome.runtime.lastError);
+        return;
+      }
+      if (message?.source === "EW_WEIDIAN_PAGE_MAIN" && message.type === "EW_SELLER_MEMBER_CATALOG" && Array.isArray(message.memberLevels)) {
+        chrome.runtime.sendMessage({
+          type: "EW_SELLER_MEMBER_CATALOG_OBSERVED",
+          memberLevels: message.memberLevels
+        }, () => void chrome.runtime.lastError);
+        state.discoveredMemberLevels = message.memberLevels;
+        state.snapshot = collectSnapshot();
+        render();
+        postObservation();
+        return;
+      }
       if (message?.source !== "EW_WEIDIAN_PAGE_MAIN" || message.type !== "EW_MEMBER_ACTION_TOKEN_DETECTED" || !message.context || !message.detection) {
         return;
       }
@@ -53,6 +71,14 @@
       }, () => void chrome.runtime.lastError);
     });
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type === "EW_EXECUTE_MEMBER_PAGE_REQUEST") {
+        requestPageMainApiCall(message.request, message.requestId || crypto.randomUUID()).then((payload) => sendResponse({ ok: true, payload })).catch((error) => sendResponse({
+          ok: false,
+          errorCode: error?.code || "NETWORK_ERROR",
+          errorMessage: error instanceof Error ? error.message : String(error)
+        }));
+        return true;
+      }
       if (message?.type === "EW_MEMBER_ACTION_TOKEN_STATE" && message.actionToken) {
         if (state.memberServerState && state.memberServerState.shopId === String(message.shopId || "")) {
           state.memberServerState = {
@@ -207,6 +233,7 @@
       const bodyText = visibleText(document.body).slice(0, 8e4);
       const itemId = url.searchParams.get("itemID") || url.searchParams.get("itemId") || matchFirst(bodyText, /itemID\s*[:：]?\s*(\d{6,})/i);
       const shopId = detectShopId(url, bodyText);
+      const buyerIds = detectBuyerIds(url);
       if (state.memberServerState?.shopId && state.memberServerState.shopId !== shopId) {
         state.memberServerState = null;
       }
@@ -219,7 +246,7 @@
       const stockTotal = collectStockTotal(bodyText);
       const detectedMemberLevels = state.memberPreviewActive ? [] : collectMemberLevels(bodyText);
       const synchronizedMemberLevels = state.memberServerState?.shopId === shopId ? state.memberServerState.gradeNames.map((label, index) => ({
-        id: `server-level-${index}`,
+        id: state.discoveredMemberLevels.find((level) => level.label === label)?.id || `server-level-${index}`,
         label,
         rank: index + 1,
         rawText: `Weidian Member API serverIndex=${index}`
@@ -233,6 +260,7 @@
         observedAtIso: (/* @__PURE__ */ new Date()).toISOString(),
         itemId: itemId || void 0,
         shopId: shopId || void 0,
+        buyerIds,
         shopName: shopName || void 0,
         productTitle: title,
         priceText: priceText ? /^[0-9]/.test(priceText) ? `\xA5${priceText}` : priceText : void 0,
@@ -260,9 +288,24 @@
       }
       return matchFirst(bodyText, /(?:店铺|상점|shop)\s*(?:ID)?\s*[:：]?\s*(\d{6,})/i);
     }
+    function detectBuyerIds(url) {
+      const values = [
+        url.searchParams.get("buyerId"),
+        url.searchParams.get("buyer_id"),
+        url.hash.match(/\/customer(?:Chain)?Detail\/([^/?#]+)/i)?.[1],
+        url.hash.match(/\/customer\/detail\/([^/?#]+)/i)?.[1]
+      ].map((value) => {
+        try {
+          return decodeURIComponent(String(value || "")).trim();
+        } catch {
+          return String(value || "").trim();
+        }
+      }).filter((value) => /^[A-Za-z0-9_-]{1,100}$/.test(value));
+      return [...new Set(values)].slice(0, 200);
+    }
     function requestMemberLevelDiscovery() {
       const shopId = state.snapshot?.shopId;
-      if (!shopId || state.snapshot.memberLevels.length > 0) return;
+      if (!shopId || state.discoveredMemberLevels.length > 0) return;
       const now = Date.now();
       if (state.memberDiscoveryShopId === shopId && now - state.memberDiscoveryRequestedAt < 3e4) return;
       state.memberDiscoveryShopId = shopId;
@@ -436,7 +479,10 @@
       return void 0;
     }
     function detectPageKind(url, bodyText, itemId) {
-      if (/d\.weidian\.com$/i.test(url.hostname) || /手机收银台|扫码.*支付|payment/i.test(bodyText)) return "payment";
+      if (/d\.weidian\.com$/i.test(url.hostname) && /(?:pc-vue-customer|mkt-pc-member|customer)/i.test(`${url.pathname}${url.hash}`)) {
+        return "member";
+      }
+      if (/手机收银台|扫码.*支付|payment/i.test(bodyText)) return "payment";
       if (/确认订单|提交订单|Confirm Order|Submit Order/i.test(bodyText)) return "checkout";
       if (itemId || /Buy Now|立即购买|Add to Cart/i.test(bodyText)) return "product";
       if (/会员|VIP[1-6]|member/i.test(bodyText)) return "member";
@@ -518,7 +564,7 @@
     }
     async function autoSyncMemberRead() {
       const snapshot = state.snapshot;
-      if (!snapshot || snapshot.pageKind !== "member" || !snapshot.shopId || state.memberCommandRunning || state.memberServerState?.shopId === snapshot.shopId) {
+      if (!snapshot || snapshot.pageKind !== "member" || !/mkt-h5-member-detail/i.test(location.pathname) || !snapshot.shopId || state.memberCommandRunning || state.memberServerState?.shopId === snapshot.shopId) {
         return;
       }
       const readKey = `${location.origin}${location.pathname}:${snapshot.shopId}`;
@@ -686,6 +732,37 @@
           source: "EW_WEIDIAN_CONTENT",
           type,
           requestId
+        }, location.origin);
+      });
+    }
+    function requestPageMainApiCall(request, requestId) {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          window.removeEventListener("message", onMessage);
+          reject(new Error("\uD310\uB9E4\uC790 \uD398\uC774\uC9C0 API \uC751\uB2F5 \uC2DC\uAC04\uC774 \uCD08\uACFC\uB418\uC5C8\uC2B5\uB2C8\uB2E4."));
+        }, 1e4);
+        function onMessage(event) {
+          if (event.source !== window || event.origin !== location.origin) return;
+          const message = event.data;
+          if (message?.source !== "EW_WEIDIAN_PAGE_MAIN" || message.requestId !== requestId || message.type !== "EW_MEMBER_PAGE_REQUEST_RESULT") {
+            return;
+          }
+          clearTimeout(timeout);
+          window.removeEventListener("message", onMessage);
+          if (message.ok && message.payload && typeof message.payload === "object") {
+            resolve(message.payload);
+          } else {
+            const error = new Error(message.errorMessage || "\uD310\uB9E4\uC790 \uD398\uC774\uC9C0 API \uC694\uCCAD\uC774 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.");
+            error.code = message.errorCode || "NETWORK_ERROR";
+            reject(error);
+          }
+        }
+        window.addEventListener("message", onMessage);
+        window.postMessage({
+          source: "EW_WEIDIAN_CONTENT",
+          type: "EW_EXECUTE_MEMBER_PAGE_REQUEST",
+          requestId,
+          request
         }, location.origin);
       });
     }
@@ -871,7 +948,7 @@
       }
       if (!watermark.isConnected) document.documentElement.appendChild(watermark);
       watermark.style.display = "block";
-      watermark.textContent = Array(40).fill(config.text || "\uB178\uBB34\uD604").join("   ");
+      watermark.textContent = Array(40).fill(config.text || "weidian").join("   ");
     }
     function downloadImages(urls) {
       if (!urls.length) {
@@ -1001,7 +1078,7 @@
       const normalized = normalizeMemberPreview(preview);
       memberPreviewCard.style.display = "grid";
       memberPreviewCard.innerHTML = `
-      <div class="ew-member-card-title">\uB178\uBB34\uD604 \uD68C\uC6D0 \uB4F1\uAE09 \uBBF8\uB9AC\uBCF4\uAE30</div>
+      <div class="ew-member-card-title">weidian \uD68C\uC6D0 \uB4F1\uAE09 \uBBF8\uB9AC\uBCF4\uAE30</div>
       <div class="ew-member-card-rank">${escapeHtml(normalized.levelLabel)}</div>
       <div class="ew-member-card-name">${escapeHtml(normalized.name)}</div>
       <div class="ew-member-card-next">\uB2E4\uC74C \uB4F1\uAE09\uAE4C\uC9C0 ${escapeHtml(String(normalized.nextValue))}</div>
@@ -1015,7 +1092,7 @@
       const options = snapshot.options || [];
       panel.innerHTML = `
       <header>
-        <strong><span class="logo">\u5E97</span> \uB178\uBB34\uD604</strong>
+        <strong><span class="logo">\u5E97</span> weidian</strong>
         <div class="header-actions">
           <span class="chip ${bridgeConnected ? "ok" : ""}">${bridgeConnected ? "\uC5F0\uACB0\uB428" : "\uC571 \uB300\uAE30"}</span>
           <button data-action="close">\u2212</button>
@@ -1098,14 +1175,14 @@
       const token = server?.actionToken;
       const writeAdapter = server?.writeAdapter;
       return `
-      <div class="safe">\uC2E4\uC81C Member \uC77D\uAE30\uC640 actionToken \uAD00\uCC30\uC740 \uD65C\uC131\uD654\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uC4F0\uAE30 endpoint\uAC00 \uC5C6\uC73C\uBA74 \uC800\uC7A5 \uB2E8\uACC4\uB9CC \uCC28\uB2E8\uB429\uB2C8\uB2E4.</div>
+      <div class="safe">\uC2E4\uC81C Member \uC77D\uAE30\uC640 \uD310\uB9E4\uC790 \uC694\uCCAD\uC758 wdtoken \uAD00\uCC30\uC774 \uD65C\uC131\uD654\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.</div>
       <p class="muted">\uD604\uC7AC \uC0C1\uC810\uC5D0\uC11C \uC0AC\uC6A9\uD560 \uB4F1\uAE09 ${levels.length}\uAC1C\uB97C \uD45C\uC2DC\uD569\uB2C8\uB2E4.</p>
       ${server ? `
         <div class="reservation">
           <span>\uC2B9\uC778 Member \uC0C1\uD0DC</span>
           <b>${escapeHtml(server.name)} \xB7 serverIndex ${server.serverIndex}</b>
           <small>${escapeHtml(server.readSource || "weidian-page")} \xB7 gradeNames ${escapeHtml(server.gradeNames.join(", "))}</small>
-          <small>actionToken ${escapeHtml(token?.status || "empty")} \xB7 fingerprint ${escapeHtml(token?.tokenFingerprint || "-")}</small>
+          <small>wdtoken ${escapeHtml(token?.status || "empty")} \xB7 fingerprint ${escapeHtml(token?.tokenFingerprint || "-")}</small>
           <small>\uC4F0\uAE30 API ${escapeHtml(writeAdapter?.errorCode || writeAdapter?.status || "MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED")}</small>
         </div>
       ` : ""}
@@ -1124,7 +1201,7 @@
     `;
     }
     function renderWatermark() {
-      const config = state.bridge?.context?.watermark || { enabled: false, text: "\uB178\uBB34\uD604" };
+      const config = state.bridge?.context?.watermark || { enabled: false, text: "weidian" };
       return `
       <h2>\uC6CC\uD130\uB9C8\uD06C</h2>
       <p class="muted">\uB370\uC2A4\uD06C\uD1B1 \uC571\uC5D0\uC11C \uC124\uC815\uD569\uB2C8\uB2E4.</p>
@@ -1206,7 +1283,7 @@
     }
     function sanitizeConsoleMessage(value) {
       return String(value || "").replace(
-        /\b(actionToken|accessToken|refreshToken|cookie|authorization|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
+        /\b(actionToken|wdtoken|accessToken|refreshToken|cookie|authorization|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
         "$1=[REDACTED]"
       ).slice(0, 400);
     }

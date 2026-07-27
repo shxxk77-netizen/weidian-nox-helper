@@ -34,13 +34,14 @@ export interface AcquiredActionToken {
 export interface MemberMutationResult {
   ok: boolean;
   serverIndex?: number;
+  verified?: boolean;
   errorCode?: string;
   errorMessage?: string;
   nextActionToken?: AcquiredActionToken;
 }
 
 export interface ActionTokenSourceConfig {
-  mode?: 'endpoint' | 'page-observer' | 'not-configured';
+  mode?: 'endpoint' | 'page-observer';
   requestUrlPattern: string;
   requestMethod: 'GET' | 'POST';
   tokenJsonPath: string;
@@ -65,30 +66,34 @@ export interface MemberStateSourceConfig {
 }
 
 export interface MemberWriteEndpointConfig {
-  status?: 'configured' | 'not-configured';
   saveUrlPattern: string;
-  resetUrlPattern: string;
-  requestMethod: 'POST' | 'PUT' | 'PATCH';
+  bulkSaveUrlPattern: string;
+  verifyUrlPattern: string;
+  requestMethod: 'GET';
   credentials: 'omit' | 'include';
-  contentType: 'application/json';
   requestHeaders?: Record<string, string>;
-  tokenPlacement:
-    | { type: 'header'; key: string }
-    | { type: 'body'; key: string }
-    | { type: 'query'; key: string };
-  memberBinding: 'current-session-user' | 'explicit-member-id';
-  memberIdField?: string;
-  shopIdField: string;
-  targetIndexField: string;
+  tokenPlacement: { type: 'query'; key: 'wdtoken' };
+  memberBinding: 'buyer-ids';
+  buyerIdsField: 'buyerIds';
+  memberIdField: 'memberId';
 }
 
 export interface AuthorizedMemberAdapterConfig {
-  mode: 'mock-localhost' | 'live-weidian' | 'not-configured';
   baseUrl: string;
   tokenSource: ActionTokenSourceConfig;
   stateSource: MemberStateSourceConfig;
   writeEndpoint: MemberWriteEndpointConfig;
 }
+
+export interface MemberPageRequest {
+  context: MemberPageContext;
+  url: string;
+  method: 'GET';
+}
+
+export type MemberPageRequestExecutor = (
+  request: MemberPageRequest
+) => Promise<Record<string, any>>;
 
 export interface MemberActionAdapter {
   detectContext(input: MemberPageContext): Promise<MemberPageContext>;

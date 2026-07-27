@@ -50,6 +50,7 @@ const FIXED_SAVE_FIELDS = new Set([
   'serverIndex',
   'gradeCount',
   'gradeNames',
+  'name',
   'clientRequestId'
 ]);
 const FIXED_RESET_FIELDS = new Set(['shopId', 'actionToken', 'clientRequestId']);
@@ -82,9 +83,13 @@ export function createMemberSecurityLab(options = {}) {
           ok: true,
           service: 'weidian-member-security-lab',
           mode,
-          liveWeidianAdapter: {
-            status: 'disabled',
-            errorCode: 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
+          memberApi: {
+            method: 'POST',
+            contentType: 'application/json',
+            state: '/api/member/context',
+            actionToken: '/api/member/action-token',
+            save: '/api/member/save',
+            reset: '/api/member/reset'
           }
         });
         return;
@@ -104,9 +109,13 @@ export function createMemberSecurityLab(options = {}) {
             role: account.role,
             allowedShopIds: [...account.allowedShopIds]
           })),
-          liveWeidianAdapter: {
-            status: 'disabled',
-            errorCode: 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
+          memberApi: {
+            method: 'POST',
+            contentType: 'application/json',
+            state: '/api/member/context',
+            actionToken: '/api/member/action-token',
+            save: '/api/member/save',
+            reset: '/api/member/reset'
           }
         });
         return;
@@ -266,7 +275,7 @@ export function createMemberSecurityLab(options = {}) {
 
         requireAuthorizedShopAdmin(session, shopId);
         assertAllowedFields(requestBody, FIXED_SAVE_FIELDS);
-        assertCurrentServerState(requestBody, state);
+        assertSelectedTarget(requestBody, state, targetIndex);
         const eligibleTargetIndex = calculateEligibleIndex(state.lifetimeSpend, state.gradeThresholds);
         if (targetIndex !== eligibleTargetIndex) {
           throw httpError(422, 'GRADE_RULE_VIOLATION', {
@@ -521,21 +530,18 @@ function assertAllowedFields(body, allowedFields) {
   }
 }
 
-function assertCurrentServerState(body, state) {
+function assertSelectedTarget(body, state, targetIndex) {
   const serverIndex = Number(body.serverIndex);
-  if (!Number.isInteger(serverIndex) || serverIndex !== state.serverIndex) {
+  if (!Number.isInteger(serverIndex) || serverIndex !== targetIndex) {
     throw httpError(409, 'SERVER_INDEX_MISMATCH', {
-      expectedServerIndex: state.serverIndex
+      expectedServerIndex: targetIndex
     });
   }
   if (Number(body.gradeCount) !== state.gradeNames.length) {
     throw httpError(409, 'GRADE_CATALOG_MISMATCH');
   }
-  if (
-    !Array.isArray(body.gradeNames) ||
-    body.gradeNames.length !== state.gradeNames.length ||
-    body.gradeNames.some((name, index) => name !== state.gradeNames[index])
-  ) {
+  const selectedName = state.gradeNames[targetIndex];
+  if (body.gradeNames !== selectedName || body.name !== selectedName) {
     throw httpError(409, 'GRADE_CATALOG_MISMATCH');
   }
 }

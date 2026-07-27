@@ -10,16 +10,16 @@ const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceApp = findSourceApp(path.join(root, 'release/mac-arm64'));
 const targetRoot = path.join(root, 'release/mac-arm64-v0.4');
-const targetApp = path.join(targetRoot, '노무현.app');
-const targetArchive = path.join(targetRoot, '노무현-v0.4.0-mac-arm64.zip');
+const targetApp = path.join(targetRoot, 'weidian.app');
+const targetArchive = path.join(targetRoot, 'weidian-v0.4.0-mac-arm64.zip');
 
 if (!fs.existsSync(sourceApp)) {
   throw new Error('기존 Electron 앱 셸을 찾을 수 없습니다. 먼저 electron-builder 패키지를 한 번 생성하세요.');
 }
 
 const workRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'weidian-helper-package-'));
-const workApp = path.join(workRoot, '노무현.app');
-const workArchive = path.join(workRoot, '노무현-v0.4.0-mac-arm64.zip');
+const workApp = path.join(workRoot, 'weidian.app');
+const workArchive = path.join(workRoot, 'weidian-v0.4.0-mac-arm64.zip');
 const stage = path.join(workRoot, 'asar');
 const verificationRoot = path.join(workRoot, 'verify');
 try {
@@ -51,7 +51,7 @@ try {
     infoPlist
   ]);
   const originalBundleName = originalBundleNameOutput.trim();
-  const brandedBundleName = '노무현';
+  const brandedBundleName = 'weidian';
   await execFileAsync('/usr/libexec/PlistBuddy', [
     '-c',
     `Set :ElectronAsarIntegrity:Resources/app.asar:hash ${asarHash}`,
@@ -76,7 +76,7 @@ try {
     '-replace',
     'CFBundleDisplayName',
     '-string',
-    '노무현',
+    'weidian',
     infoPlist
   ]);
   await execFileAsync('/usr/bin/plutil', [
@@ -121,7 +121,7 @@ try {
   ]);
   await fs.promises.mkdir(verificationRoot, { recursive: true });
   await execFileAsync('/usr/bin/ditto', ['-x', '-k', workArchive, verificationRoot]);
-  const extractedApp = path.join(verificationRoot, '노무현.app');
+  const extractedApp = path.join(verificationRoot, 'weidian.app');
   await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', extractedApp]);
 
   await fs.promises.rm(targetRoot, { recursive: true, force: true });
@@ -155,13 +155,13 @@ async function loadAsar(projectRoot) {
 
 function findSourceApp(directory) {
   if (!fs.existsSync(directory)) {
-    return path.join(directory, 'Weidian Nox Helper.app');
+    return path.join(directory, 'weidian.app');
   }
   const candidates = fs
     .readdirSync(directory)
     .filter((name) => name.endsWith('.app'))
     .sort((a, b) =>
-      a === 'Weidian Nox Helper.app' ? -1 : b === 'Weidian Nox Helper.app' ? 1 : a.localeCompare(b)
+      a === 'weidian.app' ? -1 : b === 'weidian.app' ? 1 : a.localeCompare(b)
     );
-  return candidates.length > 0 ? path.join(directory, candidates[0]) : path.join(directory, 'Weidian Nox Helper.app');
+  return candidates.length > 0 ? path.join(directory, candidates[0]) : path.join(directory, 'weidian.app');
 }

@@ -164,12 +164,23 @@ export class MemberCommandHandler {
     let mutationError: MemberActionError | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        await this.performMutation(
+        const mutation = await this.performMutation(
           effectiveContext,
           'save-vip-settings',
           (rawToken) => this.adapter.saveVipSettings(effectiveContext, rawToken, payload)
         );
         mutationError = undefined;
+        if (mutation.serverIndex === target) {
+          const state = {
+            ...before,
+            serverIndex: target,
+            name: payload.name,
+            syncedAtIso: new Date(this.now()).toISOString(),
+            actionToken: this.tokenManager.getStatus(effectiveContext, 'save-vip-settings')
+          };
+          this.states.set(context.shopId, state);
+          return state;
+        }
       } catch (error) {
         mutationError = toMemberActionError(error);
       }
@@ -239,7 +250,7 @@ export class MemberCommandHandler {
     context: MemberPageContext,
     action: 'save-vip-settings' | 'reset-vip-settings',
     mutate: (rawToken: string) => Promise<MemberMutationResult>
-  ): Promise<void> {
+  ): Promise<MemberMutationResult> {
     this.adapter.validateWriteConfiguration?.(action);
     const rawToken = await this.tokenManager.getOrAcquireRawToken(context, action);
     this.tokenManager.markConsuming(context, action);
@@ -253,6 +264,7 @@ export class MemberCommandHandler {
           true
         );
       }
+      return result;
     } catch (error) {
       const caught = toMemberActionError(error);
       if (caught.requestStarted) {
@@ -325,6 +337,12 @@ export function validateSaveVipSettingsPayload(value: unknown): SaveVipSettingsP
   if (!value || typeof value !== 'object') throw new MemberActionError('SERVER_RESPONSE_INVALID');
   const payload = value as Partial<SaveVipSettingsPayload>;
   if (!payload.shopId) throw new MemberActionError('SHOP_ID_MISSING');
+  if (!Array.isArray(payload.buyerIds) || payload.buyerIds.length === 0) {
+    throw new MemberActionError('SERVER_RESPONSE_INVALID', 'buyerIds가 비어 있습니다.');
+  }
+  if (!payload.memberId || typeof payload.memberId !== 'string') {
+    throw new MemberActionError('SERVER_RESPONSE_INVALID', 'Member 등급 ID가 비어 있습니다.');
+  }
   if (!Number.isInteger(payload.serverIndex)) throw new MemberActionError('SERVER_INDEX_INVALID');
   if (!Number.isInteger(payload.targetIndex)) throw new MemberActionError('TARGET_INDEX_INVALID');
   if ((payload.targetIndex as number) < 0 || (payload.targetIndex as number) >= Number(payload.gradeCount)) {
@@ -336,6 +354,8 @@ export function validateSaveVipSettingsPayload(value: unknown): SaveVipSettingsP
   if (!payload.targetPageUrl) throw new MemberActionError('TARGET_PAGE_URL_MISSING');
   return {
     shopId: payload.shopId,
+    buyerIds: payload.buyerIds.map(String),
+    memberId: payload.memberId,
     serverIndex: payload.serverIndex as number,
     targetIndex: payload.targetIndex as number,
     gradeCount: payload.gradeCount as number,

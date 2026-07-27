@@ -115,6 +115,7 @@ export interface MemberPageContext {
   origin: string;
   pageUrl: string;
   shopId: string;
+  buyerIds?: string[];
   sessionFingerprint: string;
   currentServerIndex: number;
   gradeCount: number;
@@ -133,6 +134,8 @@ export interface SyncVipGradesPayload {
 
 export interface SaveVipSettingsPayload {
   shopId: string;
+  buyerIds: string[];
+  memberId: string;
   serverIndex: number;
   targetIndex: number;
   gradeCount: number;
@@ -169,6 +172,7 @@ export interface BrowserPageSnapshot {
   observedAtIso: string;
   itemId?: string;
   shopId?: string;
+  buyerIds?: string[];
   shopName?: string;
   productTitle?: string;
   priceText?: string;
@@ -181,6 +185,50 @@ export interface BrowserPageSnapshot {
   memberServerState?: BrowserMemberServerState;
 }
 
+export type MemberApiContractTokenPlacement =
+  | 'header'
+  | 'body'
+  | 'query'
+  | 'response'
+  | 'not-observed';
+
+export type MemberApiContractSource =
+  | 'chrome-web-request'
+  | 'page-main';
+
+export interface BrowserMemberApiContractObservation {
+  id: string;
+  observerVersion: number;
+  source: MemberApiContractSource;
+  observedAtIso: string;
+  lastObservedAtIso: string;
+  sampleCount: number;
+  page?: string;
+  shopId?: string;
+  transport: string;
+  method: string;
+  url: string;
+  queryKeys: string[];
+  queryShape?: unknown;
+  requestHeaderNames: string[];
+  requestHeaderMetadata?: {
+    contentType?: string;
+    origin?: string;
+    referer?: string;
+  };
+  requestBodyShape?: unknown;
+  tokenPlacement: MemberApiContractTokenPlacement;
+  chromeSessionCookie: boolean;
+  credentials?: string;
+  status?: number;
+  outcome?: string;
+  errorName?: string;
+  responseHeaderNames: string[];
+  responseContentType?: string;
+  responseBodyShape?: unknown;
+  curlTemplate: string;
+}
+
 export interface BrowserBridgeState {
   running: boolean;
   port: number;
@@ -189,6 +237,7 @@ export interface BrowserBridgeState {
   lastSeenAtIso?: string;
   snapshot?: BrowserPageSnapshot;
   lastMemberCommandResult?: BrowserMemberCommandResult;
+  memberApiContracts: BrowserMemberApiContractObservation[];
   lastError?: string;
 }
 
@@ -233,6 +282,13 @@ export interface BrowserReservationRequest {
   mode: BrowserReservationMode;
 }
 
+export interface MemberPageOpenResult {
+  status: 'member-opened' | 'source-opened';
+  openedUrl: string;
+  memberUrl?: string;
+  shopId?: string;
+}
+
 export type BrowserCommandType =
   | 'refresh'
   | 'open-options'
@@ -273,6 +329,7 @@ export interface AppSettings {
   browserMemberPreviewByShop: Record<string, BrowserMemberPreview>;
   browserReservationOptionKeyword: string;
   browserReservationMode: BrowserReservationMode;
+  browserMemberApi: import('./memberAnalysisContract').MemberApiConnectionSettings;
   savedStores: SavedStore[];
 }
 
@@ -291,6 +348,7 @@ export interface RendererApi {
   onLog: (callback: (entry: LogEntry) => void) => () => void;
   getBrowserBridgeState: () => Promise<BrowserBridgeState>;
   openInChrome: (url: string) => Promise<void>;
+  openMemberInChrome: (url: string, detectedShopId?: string) => Promise<MemberPageOpenResult>;
   showExtensionFolder: () => Promise<void>;
   copyText: (text: string) => Promise<void>;
   saveCurrentStore: (store: Omit<SavedStore, 'savedAtIso'>) => Promise<AppSettings>;

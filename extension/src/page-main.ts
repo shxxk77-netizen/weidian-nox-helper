@@ -17,6 +17,32 @@ import { detectActionTokens } from './member/action-token-detector';
   window.addEventListener('message', async (event) => {
     if (event.source !== window || event.origin !== location.origin) return;
     const message = event.data;
+    if (
+      message?.source === 'EW_WEIDIAN_CONTENT' &&
+      message.type === 'EW_EXECUTE_MEMBER_PAGE_REQUEST' &&
+      message.requestId
+    ) {
+      try {
+        const payload = await executeMemberPageRequest(message.request);
+        window.postMessage({
+          source: 'EW_WEIDIAN_PAGE_MAIN',
+          type: 'EW_MEMBER_PAGE_REQUEST_RESULT',
+          requestId: message.requestId,
+          ok: true,
+          payload
+        }, location.origin);
+      } catch (error) {
+        window.postMessage({
+          source: 'EW_WEIDIAN_PAGE_MAIN',
+          type: 'EW_MEMBER_PAGE_REQUEST_RESULT',
+          requestId: message.requestId,
+          ok: false,
+          errorCode: error?.code || 'NETWORK_ERROR',
+          errorMessage: sanitizeMessage(error instanceof Error ? error.message : String(error))
+        }, location.origin);
+      }
+      return;
+    }
     if (message?.source !== 'EW_WEIDIAN_CONTENT' || !REQUEST_TYPES.has(message.type) || !message.requestId) return;
     try {
       if (message.type === 'EW_MEMBER_TOKEN_REFRESH' || message.type === 'EW_MEMBER_TOKEN_SCAN') {
@@ -39,6 +65,44 @@ import { detectActionTokens } from './member/action-token-detector';
       }, location.origin);
     }
   });
+
+  async function executeMemberPageRequest(request) {
+    const url = new URL(String(request?.url || ''));
+    if (
+      request?.method !== 'GET' ||
+      url.protocol !== 'https:' ||
+      url.hostname !== 'thor.weidian.com' ||
+      ![
+        '/wdcrm/trade.setMemberLevel/2.0',
+        '/wdcrm/customer.summary.pc/1.0'
+      ].includes(url.pathname) ||
+      !url.searchParams.get('wdtoken') ||
+      !url.searchParams.get('param')
+    ) {
+      throw codedError('MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED', '허용되지 않은 Member 요청입니다.');
+    }
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json, text/plain, */*'
+      }
+    });
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw codedError('SERVER_RESPONSE_INVALID', 'Weidian API가 JSON을 반환하지 않았습니다.');
+    }
+    if (!response.ok) {
+      throw codedError(
+        response.status === 401 || response.status === 403 ? 'PERMISSION_DENIED' : 'NETWORK_ERROR',
+        payload?.status?.message || `HTTP ${response.status}`
+      );
+    }
+    return payload;
+  }
 
   async function collectMemberContext() {
     const url = new URL(location.href);
@@ -178,7 +242,7 @@ import { detectActionTokens } from './member/action-token-detector';
 
   function sanitizeMessage(message) {
     return String(message)
-      .replace(/\b(actionToken|token|cookie|authorization|ct|session)\b\s*[:=]\s*([^\s,;]+)/gi, '$1=[REDACTED]')
+      .replace(/\b(actionToken|wdtoken|token|cookie|authorization|ct|session)\b\s*[:=]\s*([^\s,;]+)/gi, '$1=[REDACTED]')
       .slice(0, 400);
   }
 
@@ -187,7 +251,9 @@ import { detectActionTokens } from './member/action-token-detector';
       window.__EW_MEMBER_API_CONTRACT_OBSERVER__ ||
       location.protocol !== 'https:' ||
       !/(^|\.)weidian\.com$/i.test(location.hostname) ||
-      !/(?:mkt-h5-member-detail|decoration\/uni-mine)/i.test(location.pathname)
+      !/(?:mkt-h5-member-detail|decoration\/uni-mine|pc-vue-customer|mkt-pc-member|weidian-loader)/i.test(
+        `${location.pathname}${location.hash}`
+      )
     ) {
       return;
     }
@@ -258,9 +324,10 @@ import { detectActionTokens } from './member/action-token-detector';
         queryKeys: [],
         requestHeaderNames: []
       };
+      const { requestHeaders: rawRequestHeaders, ...safeRequest } = request;
       const requestBodyShape = describeBody(body);
       const requestHeaderNames = request.requestHeaderNames || [];
-      emitRequestTokenCandidates(request.url, request.requestHeaders, body);
+      emitRequestTokenCandidates(request.url, rawRequestHeaders, body);
       this.addEventListener('loadend', () => {
         let responseBodyShape;
         let responseValue;
@@ -274,6 +341,7 @@ import { detectActionTokens } from './member/action-token-detector';
         }
         if (responseValue !== undefined) {
           observeMemberState(request.url, responseValue);
+          observeSellerMemberCatalog(request.url, responseValue);
           emitDetectedTokens(
             detectActionTokens(responseValue, {
               placement: 'response',
@@ -283,7 +351,7 @@ import { detectActionTokens } from './member/action-token-detector';
         }
         emitContract({
           transport: 'xhr',
-          ...request,
+          ...safeRequest,
           requestBodyShape,
           requestHeaderNames,
           tokenPlacement: detectTokenPlacement(
@@ -511,6 +579,43 @@ import { detectActionTokens } from './member/action-token-detector';
     };
   }
 
+  function observeSellerMemberCatalog(requestUrl, payload) {
+    let url;
+    try {
+      url = new URL(String(requestUrl || ''), location.href);
+    } catch {
+      return;
+    }
+    if (!/\/wdcrm\/trade\.searchMemberByShopId\/1\.0$/i.test(url.pathname)) return;
+    const datas = payload?.result?.datas || payload?.data?.result?.datas;
+    if (!Array.isArray(datas)) return;
+    const seen = new Set();
+    const memberLevels = datas.flatMap((item, index) => {
+      const id = String(item?.level ?? '').trim();
+      const label = normalize(item?.name || item?.levelName || item?.memberName);
+      if (
+        !id ||
+        !label ||
+        !/^[A-Za-z0-9_-]{1,100}$/.test(id) ||
+        seen.has(id)
+      ) {
+        return [];
+      }
+      seen.add(id);
+      return [{
+        id,
+        label,
+        rank: index + 1
+      }];
+    }).slice(0, 30);
+    if (!memberLevels.length) return;
+    window.postMessage({
+      source: 'EW_WEIDIAN_PAGE_MAIN',
+      type: 'EW_SELLER_MEMBER_CATALOG',
+      memberLevels
+    }, location.origin);
+  }
+
   function unwrapMemberResult(payload) {
     if (!payload || typeof payload !== 'object') return undefined;
     if (payload.result && typeof payload.result === 'object') return payload.result;
@@ -569,6 +674,7 @@ import { detectActionTokens } from './member/action-token-detector';
     }
     if (responseValue !== undefined) {
       observeMemberState(requestUrl, responseValue);
+      observeSellerMemberCatalog(requestUrl, responseValue);
       emitDetectedTokens(
         detectActionTokens(responseValue, {
           placement: 'response',
@@ -623,12 +729,12 @@ import { detectActionTokens } from './member/action-token-detector';
   function describeBody(body) {
     if (body === undefined || body === null) return undefined;
     if (body instanceof URLSearchParams) {
-      return Object.fromEntries([...new Set([...body.keys()])].sort().map((key) => [key, 'string']));
+      return describeSearchParams(body);
     }
     if (body instanceof FormData) {
       const result = {};
       for (const [key, value] of body.entries()) {
-        result[key] = typeof value === 'string' ? 'string' : 'file';
+        result[key] = typeof value === 'string' ? describeEncodedValue(value) : 'file';
       }
       return result;
     }
@@ -639,7 +745,7 @@ import { detectActionTokens } from './member/action-token-detector';
         try {
           const params = new URLSearchParams(body);
           if ([...params.keys()].length) {
-            return Object.fromEntries([...new Set([...params.keys()])].sort().map((key) => [key, 'string']));
+            return describeSearchParams(params);
           }
         } catch {
           // Keep only the primitive type.
@@ -665,7 +771,7 @@ import { detectActionTokens } from './member/action-token-detector';
   }
 
   function detectTokenPlacement(queryKeys, headerNames, bodyShape, queryShape) {
-    const isActionTokenKey = (key) => /^(?:x-)?action[-_]?token$/i.test(String(key));
+    const isActionTokenKey = (key) => /^(?:(?:x-)?action[-_]?token|wdtoken)$/i.test(String(key));
     if (queryKeys.some(isActionTokenKey)) return 'query';
     if (containsShapeKey(queryShape, isActionTokenKey)) return 'query';
     if (headerNames.some(isActionTokenKey)) return 'header';

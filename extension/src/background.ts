@@ -2,7 +2,7 @@
 import { InMemoryActionTokenManager } from './member/action-token-manager';
 import {
   AuthorizedMemberActionAdapter,
-  LIVE_PAGE_MEMBER_CONFIG
+  MEMBER_ANALYSIS_CONFIG
 } from './member/member-action-adapter';
 import { MemberCommandHandler } from './member/member-command-handler';
 import { PageObservedActionTokenSource } from './member/page-action-token-source';
@@ -16,10 +16,17 @@ let fastPollTimer = null;
 const memberLevelCache = new Map();
 const memberLevelJobs = new Map();
 const memberRequestContracts = new Map();
+const observedWdTokens = new Map();
+let latestSellerMemberLevels = null;
 let memberRequestObservationCount = 0;
-const MAX_MEMBER_REQUEST_OBSERVATIONS = 200;
+let memberApiConnectionFingerprint = '';
+const MAX_MEMBER_REQUEST_OBSERVATIONS = 500;
 
-const memberAdapter = new AuthorizedMemberActionAdapter(LIVE_PAGE_MEMBER_CONFIG);
+const memberAdapter = new AuthorizedMemberActionAdapter(
+  MEMBER_ANALYSIS_CONFIG,
+  fetch,
+  executeMemberRequestInSellerPage
+);
 const pageTokenSource = new PageObservedActionTokenSource(requestMemberActionTokenScan);
 const actionTokenManager = new InMemoryActionTokenManager(
   (context, action) => pageTokenSource.acquire(context, action),
@@ -32,13 +39,17 @@ installMemberApiContractObserver();
 
 function installMemberApiContractObserver() {
   if (!chrome.webRequest?.onBeforeRequest) return;
-  const filter = { urls: ['https://thor.weidian.com/*'] };
+  const filter = {
+    urls: ['https://weidian.com/*', 'https://*.weidian.com/*'],
+    types: ['xmlhttprequest', 'other']
+  };
 
   chrome.webRequest.onBeforeRequest.addListener(
     (details) => {
-      if (!isMemberApiUrl(details.url) || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) {
+      if (!isCandidateWeidianApiUrl(details.url) || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) {
         return;
       }
+      captureObservedWdToken(details);
       const describedUrl = describeContractUrl(details.url);
       memberRequestContracts.set(details.requestId, {
         observerVersion: 1,
@@ -101,11 +112,74 @@ function installMemberApiContractObserver() {
   );
 }
 
-function isMemberApiUrl(rawUrl) {
+function captureObservedWdToken(details) {
+  try {
+    const url = new URL(details.url);
+    const rawToken = String(url.searchParams.get('wdtoken') || '').trim();
+    if (
+      !rawToken ||
+      rawToken.length > 4096 ||
+      !Number.isInteger(details.tabId) ||
+      details.tabId < 0
+    ) {
+      return;
+    }
+    observedWdTokens.set(details.tabId, {
+      rawToken,
+      tabId: details.tabId,
+      observedAtEpochMs: Date.now(),
+      sourceUrl: `${url.origin}${url.pathname}`
+    });
+    trimObservedWdTokens();
+  } catch {
+    // Only valid Weidian request URLs are captured.
+  }
+}
+
+function trimObservedWdTokens() {
+  const cutoff = Date.now() - 30 * 60_000;
+  for (const [tabId, token] of observedWdTokens) {
+    if (token.observedAtEpochMs < cutoff) observedWdTokens.delete(tabId);
+  }
+}
+
+function latestObservedWdToken() {
+  trimObservedWdTokens();
+  return [...observedWdTokens.values()]
+    .sort((left, right) => right.observedAtEpochMs - left.observedAtEpochMs)[0];
+}
+
+function isCandidateWeidianApiUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
-    return url.hostname === 'thor.weidian.com' && /\/(?:promotion|wdcrm)\//i.test(url.pathname) &&
-      /(?:member|customer|material|shopIdentity)/i.test(url.pathname);
+    return /(^|\.)weidian\.com$/i.test(url.hostname) &&
+      (
+        url.hostname === 'thor.weidian.com' ||
+        /\/\d+\.\d+(?:\/|$)/.test(url.pathname) ||
+        /(?:api|member|customer|grade|vip|shopidentity)/i.test(url.pathname)
+      );
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyMemberApiUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return /(^|\.)weidian\.com$/i.test(url.hostname) &&
+      /(?:member|customer|grade|vip|shopidentity|identitycenter|wdcrm)/i.test(
+        `${url.hostname}${url.pathname}`
+      );
+  } catch {
+    return false;
+  }
+}
+
+function isMemberPageUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return /(^|\.)weidian\.com$/i.test(url.hostname) &&
+      /\/m\/mkt-h5-member-detail\/index(?:\.html)?\/?$/i.test(url.pathname);
   } catch {
     return false;
   }
@@ -226,7 +300,7 @@ function contentTypeFromHeaders(headers) {
 }
 
 function detectContractTokenPlacement(queryKeys, headerNames, bodyShape, queryShape) {
-  const isActionTokenKey = (key) => /^(?:x-)?action[-_]?token$/i.test(String(key));
+  const isActionTokenKey = (key) => /^(?:(?:x-)?action[-_]?token|wdtoken)$/i.test(String(key));
   if (queryKeys.some(isActionTokenKey) || containsContractShapeKey(queryShape, isActionTokenKey)) return 'query';
   if (headerNames.some(isActionTokenKey)) return 'header';
   if (containsContractShapeKey(bodyShape, isActionTokenKey)) return 'body';
@@ -243,7 +317,6 @@ function emitMemberRequestContract(requestId) {
   const contract = memberRequestContracts.get(requestId);
   memberRequestContracts.delete(requestId);
   if (!contract || memberRequestObservationCount >= MAX_MEMBER_REQUEST_OBSERVATIONS) return;
-  memberRequestObservationCount += 1;
   const tabId = contract.tabId;
   delete contract.tabId;
   if (!Number.isInteger(tabId) || tabId < 0) return;
@@ -251,6 +324,49 @@ function emitMemberRequestContract(requestId) {
     type: 'EW_MEMBER_API_CONTRACT_OBSERVATION',
     observation: contract
   }).catch(() => {});
+  void publishMemberRequestContract(tabId, contract);
+}
+
+async function publishMemberRequestContract(tabId, observation) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const pageUrl = String(tab.url || '');
+    if (!isMemberPageUrl(pageUrl) && !isLikelyMemberApiUrl(observation.url)) return;
+    const page = safeMemberPage(pageUrl);
+    const shopId = memberShopIdFromPage(pageUrl);
+    await bridgeFetch('/api/member-api-contract', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: observation.source === 'page-main' ? 'page-main' : 'chrome-web-request',
+        pageUrl: page,
+        shopId,
+        observation
+      })
+    });
+    memberRequestObservationCount += 1;
+  } catch {
+    // The next live request can be retried when the local bridge is available.
+  }
+}
+
+function safeMemberPage(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (!/(^|\.)weidian\.com$/i.test(url.hostname)) return undefined;
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function memberShopIdFromPage(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const shopId = url.searchParams.get('shopId') || url.searchParams.get('shopid');
+    return /^\d{6,20}$/.test(String(shopId || '')) ? shopId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function trimMemberRequestContracts() {
@@ -273,6 +389,16 @@ async function bridgeFetch(path, init = {}) {
 }
 
 async function requestMemberActionTokenScan(context, action) {
+  const observedWdToken = latestObservedWdToken();
+  if (observedWdToken) {
+    pageTokenSource.accept(context, action, {
+      rawToken: observedWdToken.rawToken,
+      issuedAtEpochMs: observedWdToken.observedAtEpochMs,
+      oneTime: false,
+      source: 'network-request'
+    });
+    return;
+  }
   const tabEntry = [...tabContexts.entries()].find(([, candidate]) =>
     candidate.shopId === context.shopId &&
     candidate.sessionFingerprint === context.sessionFingerprint
@@ -280,7 +406,7 @@ async function requestMemberActionTokenScan(context, action) {
   if (!tabEntry) {
     throw memberCommandError(
       'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-      '현재 로그인 세션과 상점에 연결된 Member 탭을 찾지 못했습니다.'
+      '현재 Chrome 세션에서 wdtoken이 포함된 Weidian 요청을 찾지 못했습니다.'
     );
   }
   const [tabId] = tabEntry;
@@ -294,15 +420,67 @@ async function requestMemberActionTokenScan(context, action) {
   } catch {
     throw memberCommandError(
       'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-      'Member 페이지의 actionToken 관찰기에 연결하지 못했습니다.'
+      'Weidian 페이지의 wdtoken 관찰기에 연결하지 못했습니다.'
     );
   }
   if (!result?.ok) {
     throw memberCommandError(
       result?.errorCode || 'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-      result?.errorMessage || 'Member 페이지의 actionToken 관찰기를 실행하지 못했습니다.'
+      result?.errorMessage || 'Weidian 페이지의 wdtoken 관찰기를 실행하지 못했습니다.'
     );
   }
+}
+
+async function executeMemberRequestInSellerPage(request) {
+  const url = new URL(String(request.url || ''));
+  if (
+    request.method !== 'GET' ||
+    url.protocol !== 'https:' ||
+    url.hostname !== 'thor.weidian.com' ||
+    ![
+      '/wdcrm/trade.setMemberLevel/2.0',
+      '/wdcrm/customer.summary.pc/1.0'
+    ].includes(url.pathname)
+  ) {
+    throw memberCommandError(
+      'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
+      '허용되지 않은 Weidian Member endpoint입니다.'
+    );
+  }
+  const rawWdToken = String(url.searchParams.get('wdtoken') || '');
+  const tokenRecord = [...observedWdTokens.values()]
+    .filter((record) => record.rawToken === rawWdToken)
+    .sort((left, right) => right.observedAtEpochMs - left.observedAtEpochMs)[0] ||
+    latestObservedWdToken();
+  if (!tokenRecord) {
+    throw memberCommandError(
+      'ACTION_TOKEN_NOT_FOUND',
+      '판매자 페이지 요청에서 wdtoken을 먼저 감지해야 합니다.'
+    );
+  }
+  let result;
+  try {
+    result = await chrome.tabs.sendMessage(tokenRecord.tabId, {
+      type: 'EW_EXECUTE_MEMBER_PAGE_REQUEST',
+      request: {
+        method: 'GET',
+        url: url.toString()
+      },
+      requestId: crypto.randomUUID()
+    });
+  } catch {
+    throw memberCommandError(
+      'TARGET_PAGE_MISMATCH',
+      'wdtoken을 감지한 판매자 탭에서 Member 요청을 실행할 수 없습니다.'
+    );
+  }
+  if (!result?.ok || !result.payload || typeof result.payload !== 'object') {
+    throw memberCommandError(
+      result?.errorCode || 'NETWORK_ERROR',
+      result?.errorMessage || '판매자 페이지의 Member 요청이 실패했습니다.'
+    );
+  }
+  return result.payload;
 }
 
 function publishActionTokenState(context, actionToken) {
@@ -338,6 +516,7 @@ async function pollBridge() {
   pollInFlight = true;
   try {
     const state = await bridgeFetch('/api/state');
+    applyMemberApiConnection(state?.context?.memberApi);
     deliverStateToPorts(state);
     const delivered = await deliverStateToTabsWithoutPorts(state);
     if (delivered.size > 0) await ackCommands([...delivered]);
@@ -345,6 +524,18 @@ async function pollBridge() {
     // The desktop app may not be running.
   } finally {
     pollInFlight = false;
+  }
+}
+
+function applyMemberApiConnection(connection) {
+  if (!connection || typeof connection !== 'object') return;
+  const fingerprint = JSON.stringify(connection);
+  if (fingerprint === memberApiConnectionFingerprint) return;
+  try {
+    memberAdapter.configureConnection(connection);
+    memberApiConnectionFingerprint = fingerprint;
+  } catch {
+    // Desktop settings validation remains the source of truth.
   }
 }
 
@@ -399,6 +590,8 @@ function stopFastPollIfIdle() {
 chrome.runtime.onInstalled.addListener(() => {
   pageTokenSource.clearAll();
   actionTokenManager.clearAll();
+  observedWdTokens.clear();
+  latestSellerMemberLevels = null;
   tabContexts.clear();
   chrome.alarms.create('ew-weidian-heartbeat', { delayInMinutes: 0, periodInMinutes: 0.5 });
   void pollBridge();
@@ -407,6 +600,8 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   pageTokenSource.clearAll();
   actionTokenManager.clearAll();
+  observedWdTokens.clear();
+  latestSellerMemberLevels = null;
   chrome.alarms.create('ew-weidian-heartbeat', { delayInMinutes: 0, periodInMinutes: 0.5 });
   void pollBridge();
 });
@@ -431,6 +626,35 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'EW_SELLER_MEMBER_CATALOG_OBSERVED') {
+    const memberLevels = normalizeSellerMemberLevels(message.memberLevels);
+    if (memberLevels.length) {
+      latestSellerMemberLevels = {
+        observedAtEpochMs: Date.now(),
+        memberLevels
+      };
+      sendResponse({ ok: true, count: memberLevels.length });
+    } else {
+      sendResponse({ ok: false, count: 0 });
+    }
+    return false;
+  }
+
+  if (message?.type === 'EW_MEMBER_API_CONTRACT_OBSERVED' && message.observation) {
+    const tabId = sender.tab?.id;
+    if (!Number.isInteger(tabId) || tabId < 0) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    void publishMemberRequestContract(tabId, {
+      ...message.observation,
+      source: 'page-main'
+    })
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message?.type === 'EW_OBSERVATION') {
     if (sender.tab && !sender.tab.active) {
       sendResponse({ ok: true, ignored: 'inactive-tab' });
@@ -513,7 +737,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       urls.map((url, index) =>
         chrome.downloads.download({
           url,
-          filename: `노무현/${folder}/${String(index + 1).padStart(3, '0')}-${fileNameFromUrl(url)}`,
+          filename: `weidian/${folder}/${String(index + 1).padStart(3, '0')}-${fileNameFromUrl(url)}`,
           conflictAction: 'uniquify',
           saveAs: false
         })
@@ -610,7 +834,7 @@ async function handleDetectedActionToken(tabId, rawContext, detection) {
   if (!rawToken || rawToken.length > 4096) {
     throw memberCommandError('ACTION_TOKEN_MISSING');
   }
-  if (detection.source === 'network-request') {
+  if (detection.source === 'network-request' && detection.oneTime !== false) {
     return {
       status: 'consumed',
       shopId,
@@ -655,7 +879,9 @@ async function handleDetectedActionToken(tabId, rawContext, detection) {
     source:
       detection.source === 'page-bootstrap'
         ? 'page-bootstrap'
-        : 'network-response'
+        : detection.source === 'network-request'
+          ? 'network-request'
+          : 'network-response'
   };
   if (pageTokenSource.accept(context, action, acquired)) {
     return {
@@ -720,6 +946,8 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
   pageTokenSource.clearAll();
   actionTokenManager.clearAll();
   tabContexts.clear();
+  observedWdTokens.clear();
+  latestSellerMemberLevels = null;
 });
 
 function clearTabContext(tabId) {
@@ -730,6 +958,7 @@ function clearTabContext(tabId) {
   if (previous.shopId) memberCommandHandler.clearShop(previous.shopId);
   tabContexts.delete(tabId);
   tabActionIntents.delete(tabId);
+  observedWdTokens.delete(tabId);
 }
 
 async function fingerprintChromeSession(context) {
@@ -772,13 +1001,19 @@ function memberCommandError(code, message) {
 function sanitizeErrorMessage(message) {
   return String(message)
     .replace(
-      /\b(actionToken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
+      /\b(actionToken|wdtoken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
       '$1=[REDACTED]'
     )
     .slice(0, 400);
 }
 
 async function discoverMemberLevels(shopId) {
+  if (
+    latestSellerMemberLevels &&
+    Date.now() - latestSellerMemberLevels.observedAtEpochMs < 10 * 60_000
+  ) {
+    return latestSellerMemberLevels.memberLevels;
+  }
   const cached = memberLevelCache.get(shopId);
   if (cached && Date.now() - cached.savedAt < 10 * 60_000) return cached.memberLevels;
   if (memberLevelJobs.has(shopId)) return memberLevelJobs.get(shopId);
@@ -799,6 +1034,25 @@ async function discoverMemberLevels(shopId) {
   })();
   memberLevelJobs.set(shopId, job);
   return job;
+}
+
+function normalizeSellerMemberLevels(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== 'object') return [];
+    const id = String(item.id || '').trim();
+    const label = String(item.label || '').trim().slice(0, 80);
+    if (!id || !label || !/^[A-Za-z0-9_-]{1,100}$/.test(id) || seen.has(id)) return [];
+    seen.add(id);
+    const rankValue = Number(item.rank);
+    return [{
+      id,
+      label,
+      rank: Number.isInteger(rankValue) && rankValue > 0 ? rankValue : index + 1,
+      rawText: 'Weidian seller member catalog'
+    }];
+  }).slice(0, 30);
 }
 
 async function collectMemberLevelsFromTab(tabId) {

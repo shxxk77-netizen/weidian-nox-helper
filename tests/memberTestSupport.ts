@@ -24,6 +24,8 @@ export const memberContext: MemberPageContext = {
 export function savePayload(overrides: Partial<SaveVipSettingsPayload> = {}): SaveVipSettingsPayload {
   return {
     shopId: memberContext.shopId,
+    buyerIds: ['buyer-test-1'],
+    memberId: 'level-4',
     serverIndex: 2,
     targetIndex: 4,
     gradeCount: 6,

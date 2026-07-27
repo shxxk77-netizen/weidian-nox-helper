@@ -6,109 +6,90 @@ import type {
   ResetVipSettingsPayload,
   SaveVipSettingsPayload
 } from '../../../src/common/types';
+import {
+  DEFAULT_MEMBER_API_CONNECTION,
+  MEMBER_API_BASE_URL,
+  MEMBER_API_ENDPOINTS,
+  MEMBER_API_HEADERS,
+  resolveMemberApiUrl,
+  type MemberApiConnectionSettings
+} from '../../../src/common/memberAnalysisContract';
 import { MemberActionError, type MemberErrorCode } from './member-errors';
 import type {
   AcquiredActionToken,
   AuthorizedMemberAdapterConfig,
   MemberActionAdapter,
-  MemberMutationResult
+  MemberMutationResult,
+  MemberPageRequestExecutor
 } from './member-types';
 
+export {
+  MEMBER_API_BASE_URL,
+  MEMBER_API_ENDPOINTS,
+  MEMBER_API_HEADERS
+};
+
 export const MEMBER_TOKEN_SOURCE = {
-  mode: 'endpoint',
-  requestUrlPattern: '/api/member/action-token',
-  requestMethod: 'POST',
-  tokenJsonPath: 'actionToken',
-  expiresAtJsonPath: 'expiresAtEpochMs',
+  mode: 'page-observer',
+  requestUrlPattern: 'wdtoken',
+  requestMethod: 'GET',
+  tokenJsonPath: 'wdtoken',
   credentials: 'include',
-  requestHeaders: {},
+  requestHeaders: MEMBER_API_HEADERS,
   tokenPlacement: {
-    type: 'body',
-    key: 'actionToken'
+    type: 'query',
+    key: 'wdtoken'
   },
-  actionBinding: 'per-action',
-  oneTime: true
+  actionBinding: 'shared',
+  oneTime: false
 } as const;
 
-export const DEFAULT_AUTHORIZED_MEMBER_CONFIG: AuthorizedMemberAdapterConfig = {
-  mode: 'mock-localhost',
-  baseUrl: 'http://127.0.0.1:4173',
-  tokenSource: MEMBER_TOKEN_SOURCE,
-  stateSource: {
-    mode: 'endpoint',
-    requestUrlPattern: '/api/member/context',
-    requestMethod: 'POST',
-    credentials: 'include',
-    requestHeaders: {}
-  },
-  writeEndpoint: {
-    status: 'configured',
-    saveUrlPattern: '/api/member/save',
-    resetUrlPattern: '/api/member/reset',
-    requestMethod: 'POST',
-    credentials: 'include',
-    contentType: 'application/json',
-    requestHeaders: {},
-    tokenPlacement: {
-      type: 'body',
-      key: 'actionToken'
+export function createMemberAnalysisConfig(
+  connection: MemberApiConnectionSettings = DEFAULT_MEMBER_API_CONNECTION
+): AuthorizedMemberAdapterConfig {
+  return {
+    baseUrl: connection.baseUrl,
+    tokenSource: MEMBER_TOKEN_SOURCE,
+    stateSource: {
+      mode: 'page-context',
+      requestUrlPattern: connection.catalogEndpoint,
+      requestMethod: 'GET',
+      credentials: 'include',
+      requestHeaders: MEMBER_API_HEADERS
     },
-    memberBinding: 'current-session-user',
-    shopIdField: 'shopId',
-    targetIndexField: 'targetIndex'
-  }
-};
+    writeEndpoint: {
+      saveUrlPattern: connection.saveEndpoint,
+      bulkSaveUrlPattern: connection.bulkSaveEndpoint,
+      verifyUrlPattern: connection.verifyEndpoint,
+      requestMethod: 'GET',
+      credentials: 'include',
+      requestHeaders: MEMBER_API_HEADERS,
+      tokenPlacement: {
+        type: 'query',
+        key: 'wdtoken'
+      },
+      memberBinding: 'buyer-ids',
+      buyerIdsField: 'buyerIds',
+      memberIdField: 'memberId'
+    }
+  };
+}
 
-export const LIVE_PAGE_MEMBER_CONFIG: AuthorizedMemberAdapterConfig = {
-  mode: 'live-weidian',
-  baseUrl: '',
-  tokenSource: {
-    mode: 'page-observer',
-    requestUrlPattern: '',
-    requestMethod: 'POST',
-    tokenJsonPath: '',
-    credentials: 'include',
-    requestHeaders: {},
-    tokenPlacement: {
-      type: 'body',
-      key: 'actionToken'
-    },
-    actionBinding: 'per-action',
-    oneTime: true
-  },
-  stateSource: {
-    mode: 'page-context',
-    requestUrlPattern: '__CONFIGURE_MEMBER_STATE_ENDPOINT__',
-    requestMethod: 'POST',
-    credentials: 'include',
-    requestHeaders: {}
-  },
-  writeEndpoint: {
-    status: 'not-configured',
-    saveUrlPattern: '__CONFIGURE_MEMBER_WRITE_ENDPOINT__',
-    resetUrlPattern: '__CONFIGURE_MEMBER_RESET_ENDPOINT__',
-    requestMethod: 'POST',
-    credentials: 'include',
-    contentType: 'application/json',
-    requestHeaders: {},
-    tokenPlacement: {
-      type: 'body',
-      key: '__CONFIGURE_ACTION_TOKEN_KEY__'
-    },
-    memberBinding: 'explicit-member-id',
-    memberIdField: '__CONFIGURE_MEMBER_ID_FIELD__',
-    shopIdField: '__CONFIGURE_SHOP_ID_FIELD__',
-    targetIndexField: '__CONFIGURE_TARGET_INDEX_FIELD__'
-  }
-};
+export const DEFAULT_AUTHORIZED_MEMBER_CONFIG: AuthorizedMemberAdapterConfig =
+  createMemberAnalysisConfig();
 
-export const UNCONFIGURED_MEMBER_CONFIG = LIVE_PAGE_MEMBER_CONFIG;
+export const MEMBER_ANALYSIS_CONFIG = DEFAULT_AUTHORIZED_MEMBER_CONFIG;
 
 export class AuthorizedMemberActionAdapter implements MemberActionAdapter {
   constructor(
-    private readonly config: AuthorizedMemberAdapterConfig = DEFAULT_AUTHORIZED_MEMBER_CONFIG,
-    private readonly fetchImpl: typeof fetch = fetch
+    private config: AuthorizedMemberAdapterConfig = DEFAULT_AUTHORIZED_MEMBER_CONFIG,
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly executeInMemberPage?: MemberPageRequestExecutor
   ) {}
+
+  configureConnection(connection: MemberApiConnectionSettings): void {
+    this.config = createMemberAnalysisConfig(connection);
+  }
 
   async detectContext(input: MemberPageContext): Promise<MemberPageContext> {
     validateContext(input);
@@ -117,19 +98,14 @@ export class AuthorizedMemberActionAdapter implements MemberActionAdapter {
 
   getWriteConfigurationStatus(): BrowserMemberWriteAdapterMeta {
     try {
-      this.assertWriteConfigured('save-vip-settings');
+      this.validateWriteConfiguration('save-vip-settings');
       return { status: 'configured' };
     } catch (error) {
       const caught = error instanceof MemberActionError
         ? error
-        : new MemberActionError('UNKNOWN_MEMBER_ERROR');
+        : new MemberActionError('MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED');
       return {
-        status:
-          caught.code === 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
-            ? 'write-endpoint-not-configured'
-            : caught.code === 'PERMISSION_DENIED'
-              ? 'permission-denied'
-              : 'error',
+        status: 'write-endpoint-not-configured',
         errorCode: caught.code,
         errorMessage: caught.message
       };
@@ -137,196 +113,173 @@ export class AuthorizedMemberActionAdapter implements MemberActionAdapter {
   }
 
   validateWriteConfiguration(action: 'save-vip-settings' | 'reset-vip-settings'): void {
-    this.assertWriteConfigured(action);
+    if (action === 'reset-vip-settings') {
+      throw new MemberActionError(
+        'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
+        '실제 판매자 API에는 별도 reset endpoint가 없습니다. 목표 등급을 선택해 저장하세요.'
+      );
+    }
+    const saveUrl = resolveConfiguredWeidianUrl(
+      this.config.baseUrl,
+      this.config.writeEndpoint.saveUrlPattern
+    );
+    if (!/\/wdcrm\/trade\.setMemberLevel\/2\.0$/i.test(saveUrl.pathname)) {
+      throw new MemberActionError(
+        'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
+        '개별 회원 저장 endpoint가 trade.setMemberLevel/2.0 형식이 아닙니다.'
+      );
+    }
   }
 
   async acquireActionToken(
-    context: MemberPageContext,
-    action: MemberActionType
+    _context: MemberPageContext,
+    _action: MemberActionType
   ): Promise<AcquiredActionToken> {
-    if (this.config.tokenSource.mode === 'page-observer') {
-      throw new MemberActionError(
-        'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-        '페이지 관찰형 actionToken source는 Chrome 페이지 관찰기를 통해 획득해야 합니다.'
-      );
-    }
-    this.assertTokenConfigured();
-    const payload = await this.requestJson(this.config.tokenSource.requestUrlPattern, {
-      method: this.config.tokenSource.requestMethod,
-      credentials: this.config.tokenSource.credentials,
-      headers: this.config.tokenSource.requestHeaders,
-      configurationError: 'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-      body: {
-        shopId: context.shopId,
-        action,
-        sessionFingerprint: context.sessionFingerprint
-      }
-    });
-    const rawToken = readJsonPath(payload, this.config.tokenSource.tokenJsonPath);
-    if (typeof rawToken !== 'string' || !rawToken.trim()) {
-      throw new MemberActionError('SERVER_RESPONSE_INVALID', '승인 서버 응답에 actionToken이 없습니다.', true);
-    }
-    const issuedAtEpochMs = finiteNumber(payload.issuedAtEpochMs) ?? Date.now();
-    const expiresAtEpochMs =
-      finiteNumber(readJsonPath(payload, this.config.tokenSource.expiresAtJsonPath)) ??
-      addExpiresIn(issuedAtEpochMs, readJsonPath(payload, this.config.tokenSource.expiresInJsonPath));
-    return {
-      rawToken,
-      issuedAtEpochMs,
-      expiresAtEpochMs,
-      oneTime: payload.oneTime === undefined ? this.config.tokenSource.oneTime : Boolean(payload.oneTime),
-      source: 'authorized-response'
-    };
+    throw new MemberActionError(
+      'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
+      'wdtoken은 로그인된 Chrome의 실제 Weidian 요청에서 자동 감지합니다.'
+    );
   }
 
   async syncVipGrades(context: MemberPageContext): Promise<BrowserMemberServerState> {
-    if (this.config.stateSource.mode === 'page-context') {
-      return {
-        ...stateFromPageContext(context),
-        writeAdapter: this.getWriteConfigurationStatus()
-      };
-    }
-    this.assertStateConfigured();
-    const payload = await this.requestJson(this.config.stateSource.requestUrlPattern, {
-      method: this.config.stateSource.requestMethod,
-      credentials: this.config.stateSource.credentials,
-      headers: this.config.stateSource.requestHeaders,
-      configurationError: 'MEMBER_STATE_ENDPOINT_NOT_CONFIGURED',
-      body: {
-        shopId: context.shopId,
-        sessionFingerprint: context.sessionFingerprint,
-        pageUrl: context.pageUrl
-      }
-    });
-    const gradeNames = Array.isArray(payload.gradeNames)
-      ? payload.gradeNames.filter((name): name is string => typeof name === 'string' && Boolean(name.trim())).slice(0, 30)
-      : [];
-    const gradeCount = finiteInteger(payload.gradeCount);
-    const serverIndex = finiteInteger(payload.serverIndex);
-    if (
-      gradeCount === undefined ||
-      gradeCount < 1 ||
-      serverIndex === undefined ||
-      serverIndex < 0 ||
-      serverIndex >= gradeCount ||
-      gradeNames.length !== gradeCount
-    ) {
-      throw new MemberActionError('SERVER_RESPONSE_INVALID', '승인 서버의 Member 상태 응답이 올바르지 않습니다.', true);
-    }
     return {
-      shopId: context.shopId,
-      serverIndex,
-      gradeCount,
-      gradeNames,
-      name: typeof payload.name === 'string' ? payload.name.slice(0, 80) : gradeNames[serverIndex],
-      remaining: finiteNumber(payload.remaining) ?? 0,
-      originalProgress: finiteNumber(payload.originalProgress) ?? 0,
-      syncedAtIso: new Date().toISOString(),
-      readSource: 'mock-endpoint',
-      actionToken: {
-        status: 'empty',
-        shopId: context.shopId,
-        action: 'save-vip-settings',
-        oneTime: true
-      },
+      ...stateFromPageContext(context),
       writeAdapter: this.getWriteConfigurationStatus()
     };
   }
 
   async saveVipSettings(
     context: MemberPageContext,
-    rawActionToken: string,
+    rawWdToken: string,
     payload: SaveVipSettingsPayload
   ): Promise<MemberMutationResult> {
-    this.assertWriteConfigured('save-vip-settings');
-    return this.mutate(this.config.writeEndpoint.saveUrlPattern, context, rawActionToken, payload);
+    this.validateWriteConfiguration('save-vip-settings');
+    const buyerIds = normalizeBuyerIds(payload.buyerIds);
+    const memberId = normalizeMemberId(payload.memberId);
+    const url = this.createGetUrl(
+      this.config.writeEndpoint.saveUrlPattern,
+      rawWdToken,
+      {
+        [this.config.writeEndpoint.buyerIdsField]: buyerIds,
+        [this.config.writeEndpoint.memberIdField]: memberId
+      }
+    );
+    const response = await this.requestJson(context, url);
+    const code = finiteInteger(response.status?.code);
+    const accepted = code === 0 && Number(response.result) === 0;
+    if (!accepted) {
+      return {
+        ok: false,
+        errorCode: code === 401 || code === 403 ? 'PERMISSION_DENIED' : 'NETWORK_ERROR',
+        errorMessage:
+          typeof response.status?.message === 'string'
+            ? response.status.message.slice(0, 400)
+            : 'Weidian Member 등급 변경 응답이 성공 조건과 일치하지 않습니다.'
+      };
+    }
+
+    const verified = await this.verifyMemberLevel(
+      context,
+      rawWdToken,
+      buyerIds[0],
+      memberId
+    ).catch(() => undefined);
+    if (verified === false) {
+      return {
+        ok: false,
+        errorCode: 'SERVER_STATE_NOT_CHANGED',
+        errorMessage: '저장 후 재조회한 회원 등급이 선택한 등급과 일치하지 않습니다.'
+      };
+    }
+    return {
+      ok: true,
+      serverIndex: payload.targetIndex,
+      verified: verified === true
+    };
   }
 
   async resetVipSettings(
-    context: MemberPageContext,
-    rawActionToken: string,
-    payload: ResetVipSettingsPayload
+    _context: MemberPageContext,
+    _rawWdToken: string,
+    _payload: ResetVipSettingsPayload
   ): Promise<MemberMutationResult> {
-    this.assertWriteConfigured('reset-vip-settings');
-    return this.mutate(this.config.writeEndpoint.resetUrlPattern, context, rawActionToken, payload);
+    this.validateWriteConfiguration('reset-vip-settings');
+    return { ok: false, errorCode: 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED' };
   }
 
-  private async mutate(
-    pathname: string,
+  private async verifyMemberLevel(
     context: MemberPageContext,
-    rawActionToken: string,
-    payload: SaveVipSettingsPayload | ResetVipSettingsPayload
-  ): Promise<MemberMutationResult> {
-    const body: Record<string, unknown> = {
-      [this.config.writeEndpoint.shopIdField]: payload.shopId,
-      clientRequestId: payload.clientRequestId
-    };
-    if ('targetIndex' in payload) {
-      body[this.config.writeEndpoint.targetIndexField] = payload.targetIndex;
-      body.serverIndex = payload.serverIndex;
-      body.gradeCount = payload.gradeCount;
-      body.gradeNames = [...payload.gradeNames];
-    }
-    const headers: Record<string, string> = {};
-    const query = new URLSearchParams();
-    const placement = this.config.writeEndpoint.tokenPlacement;
-    if (placement.type === 'body') body[placement.key] = rawActionToken;
-    if (placement.type === 'header') headers[placement.key] = rawActionToken;
-    if (placement.type === 'query') query.set(placement.key, rawActionToken);
-    const response = await this.requestJson(`${pathname}${query.size ? `?${query}` : ''}`, {
-      method: this.config.writeEndpoint.requestMethod,
-      credentials: this.config.writeEndpoint.credentials,
-      body,
-      headers: {
-        ...this.config.writeEndpoint.requestHeaders,
-        ...headers
-      },
-      contentType: this.config.writeEndpoint.contentType,
-      configurationError: 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
-    });
-    return {
-      ok: response.ok === true,
-      serverIndex: finiteInteger(response.serverIndex),
-      errorCode: typeof response.errorCode === 'string' ? response.errorCode : undefined,
-      errorMessage: typeof response.errorMessage === 'string' ? response.errorMessage.slice(0, 400) : undefined
-    };
+    rawWdToken: string,
+    buyerId: string,
+    expectedMemberId: string
+  ): Promise<boolean | undefined> {
+    const verifyUrl = resolveConfiguredWeidianUrl(
+      this.config.baseUrl,
+      this.config.writeEndpoint.verifyUrlPattern
+    );
+    const url = new URL(verifyUrl);
+    url.searchParams.set('_', String(Date.now()));
+    url.searchParams.set('param', JSON.stringify({
+      buyer_id: buyerId,
+      page_size: 2
+    }));
+    url.searchParams.set('wdtoken', rawWdToken);
+    const response = await this.requestJson(context, url);
+    if (finiteInteger(response.status?.code) !== 0) return undefined;
+    const detected = collectMemberLevelIds(response.result);
+    if (!detected.length) return undefined;
+    return detected.includes(expectedMemberId);
+  }
+
+  private createGetUrl(
+    pathname: string,
+    rawWdToken: string,
+    param: Record<string, unknown>
+  ): URL {
+    const url = resolveConfiguredWeidianUrl(this.config.baseUrl, pathname);
+    url.searchParams.set('_', String(Date.now()));
+    url.searchParams.set('param', JSON.stringify(param));
+    url.searchParams.set(this.config.writeEndpoint.tokenPlacement.key, rawWdToken);
+    return url;
   }
 
   private async requestJson(
-    pathname: string,
-    input: {
-      method: 'GET' | 'POST' | 'PUT' | 'PATCH';
-      credentials: 'omit' | 'include';
-      body?: Record<string, unknown>;
-      headers?: Record<string, string>;
-      contentType?: 'application/json';
-      configurationError: 'ACTION_TOKEN_SOURCE_NOT_CONFIGURED'
-        | 'MEMBER_STATE_ENDPOINT_NOT_CONFIGURED'
-        | 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED';
-    }
+    context: MemberPageContext,
+    url: URL
   ): Promise<Record<string, any>> {
-    const base = this.authorizedBaseUrl(input.configurationError);
-    const url = new URL(pathname, base);
+    if (this.executeInMemberPage) {
+      try {
+        return await this.executeInMemberPage({
+          context,
+          url: url.toString(),
+          method: 'GET'
+        });
+      } catch (error) {
+        if (error instanceof MemberActionError) throw error;
+        throw new MemberActionError(
+          'NETWORK_ERROR',
+          error instanceof Error ? error.message : '판매자 페이지 요청 실행에 실패했습니다.',
+          true
+        );
+      }
+    }
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
+    const timer = setTimeout(() => controller.abort(), 8_000);
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
-        method: input.method,
+        method: 'GET',
         cache: 'no-store',
-        credentials: input.credentials,
+        credentials: 'include',
         signal: controller.signal,
-        headers: {
-          'content-type': input.contentType || 'application/json',
-          ...(input.headers || {})
-        },
-        body: input.method === 'GET' ? undefined : JSON.stringify(input.body || {})
+        headers: this.config.writeEndpoint.requestHeaders
       });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new MemberActionError('NETWORK_TIMEOUT', '승인 Member 서버 요청 시간이 초과되었습니다.', true);
+        throw new MemberActionError('NETWORK_TIMEOUT', 'Weidian Member 요청 시간이 초과되었습니다.', true);
       }
-      throw new MemberActionError('NETWORK_ERROR', '승인 Member 서버에 연결할 수 없습니다.', true);
+      throw new MemberActionError('NETWORK_ERROR', 'Weidian Member API에 연결할 수 없습니다.', true);
     } finally {
       clearTimeout(timer);
     }
@@ -335,111 +288,18 @@ export class AuthorizedMemberActionAdapter implements MemberActionAdapter {
     try {
       payload = await response.json() as Record<string, any>;
     } catch {
-      throw new MemberActionError('SERVER_RESPONSE_INVALID', '승인 Member 서버가 JSON을 반환하지 않았습니다.', true);
+      throw new MemberActionError('SERVER_RESPONSE_INVALID', 'Weidian API가 JSON을 반환하지 않았습니다.', true);
     }
-    if (!response.ok || payload.ok === false) {
-      const code = normalizeServerErrorCode(payload.errorCode, response.status);
+    if (!response.ok) {
       throw new MemberActionError(
-        code,
-        typeof payload.errorMessage === 'string' ? payload.errorMessage.slice(0, 400) : code,
+        normalizeServerErrorCode(payload.status?.code, response.status),
+        typeof payload.status?.message === 'string'
+          ? payload.status.message.slice(0, 400)
+          : `HTTP ${response.status}`,
         true
       );
     }
     return payload;
-  }
-
-  private assertTokenConfigured(): void {
-    if (
-      this.config.tokenSource.mode === 'not-configured' ||
-      this.config.tokenSource.mode === 'page-observer' ||
-      this.config.mode === 'not-configured' ||
-      !this.config.baseUrl ||
-      this.config.tokenSource.requestUrlPattern.startsWith('__CONFIGURE_')
-    ) {
-      throw new MemberActionError(
-        'ACTION_TOKEN_SOURCE_NOT_CONFIGURED',
-        '승인된 actionToken source가 설정되지 않았습니다.'
-      );
-    }
-    this.authorizedBaseUrl('ACTION_TOKEN_SOURCE_NOT_CONFIGURED');
-  }
-
-  private assertStateConfigured(): void {
-    if (this.config.stateSource.mode === 'page-context') return;
-    if (
-      this.config.writeEndpoint.status === 'not-configured' ||
-      this.config.mode === 'not-configured' ||
-      !this.config.baseUrl ||
-      !this.config.stateSource.requestUrlPattern ||
-      this.config.stateSource.requestUrlPattern.startsWith('__CONFIGURE_')
-    ) {
-      throw new MemberActionError(
-        'MEMBER_STATE_ENDPOINT_NOT_CONFIGURED',
-        '저장 결과를 검증할 승인 Member 조회 endpoint가 설정되지 않았습니다.'
-      );
-    }
-    this.authorizedBaseUrl('MEMBER_STATE_ENDPOINT_NOT_CONFIGURED');
-  }
-
-  private assertWriteConfigured(action: 'save-vip-settings' | 'reset-vip-settings'): void {
-    const endpoint = action === 'save-vip-settings'
-      ? this.config.writeEndpoint.saveUrlPattern
-      : this.config.writeEndpoint.resetUrlPattern;
-    const placementKey = this.config.writeEndpoint.tokenPlacement.key;
-    if (
-      this.config.mode === 'not-configured' ||
-      !this.config.baseUrl ||
-      !endpoint ||
-      endpoint.startsWith('__CONFIGURE_') ||
-      !placementKey ||
-      placementKey.startsWith('__CONFIGURE_') ||
-      !this.config.writeEndpoint.shopIdField ||
-      this.config.writeEndpoint.shopIdField.startsWith('__CONFIGURE_') ||
-      !this.config.writeEndpoint.targetIndexField ||
-      this.config.writeEndpoint.targetIndexField.startsWith('__CONFIGURE_') ||
-      (
-        this.config.writeEndpoint.memberBinding === 'explicit-member-id' &&
-        (
-          !this.config.writeEndpoint.memberIdField ||
-          this.config.writeEndpoint.memberIdField.startsWith('__CONFIGURE_')
-        )
-      )
-    ) {
-      throw new MemberActionError(
-        'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
-        '승인된 Member 쓰기 endpoint와 요청 계약이 설정되지 않았습니다.'
-      );
-    }
-    this.authorizedBaseUrl('MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED');
-  }
-
-  private authorizedBaseUrl(
-    configurationError: 'ACTION_TOKEN_SOURCE_NOT_CONFIGURED'
-      | 'MEMBER_STATE_ENDPOINT_NOT_CONFIGURED'
-      | 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
-  ): URL {
-    let url: URL;
-    try {
-      url = new URL(this.config.baseUrl);
-    } catch {
-      throw new MemberActionError(configurationError);
-    }
-    const mockAllowed =
-      this.config.mode === 'mock-localhost' &&
-      url.protocol === 'http:' &&
-      ['127.0.0.1', 'localhost'].includes(url.hostname) &&
-      url.port === '4173';
-    const liveAllowed =
-      this.config.mode === 'live-weidian' &&
-      url.protocol === 'https:' &&
-      /(^|\.)weidian\.com$/i.test(url.hostname);
-    if (!mockAllowed && !liveAllowed) {
-      throw new MemberActionError(
-        configurationError,
-        'Member 어댑터 실행환경과 endpoint origin이 일치하지 않습니다.'
-      );
-    }
-    return url;
   }
 }
 
@@ -459,12 +319,10 @@ function stateFromPageContext(context: MemberPageContext): BrowserMemberServerSt
       status: 'empty',
       shopId: context.shopId,
       action: 'save-vip-settings',
-      oneTime: true
+      oneTime: false
     },
     writeAdapter: {
-      status: 'write-endpoint-not-configured',
-      errorCode: 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
-      errorMessage: '실제 Member 쓰기 endpoint와 요청 계약이 설정되지 않았습니다.'
+      status: 'configured'
     }
   };
 }
@@ -477,12 +335,59 @@ function validateContext(context: MemberPageContext): void {
   if (context.gradeNames.length !== context.gradeCount) throw new MemberActionError('GRADE_CATALOG_MISMATCH');
 }
 
-function readJsonPath(value: Record<string, any>, path: string | undefined): unknown {
-  if (!path || path.startsWith('__CONFIGURE_')) return undefined;
-  return path.split('.').reduce<unknown>((current, key) => {
-    if (!current || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[key];
-  }, value);
+function resolveConfiguredWeidianUrl(baseUrl: string, endpoint: string): URL {
+  let url: URL;
+  try {
+    url = new URL(resolveMemberApiUrl(baseUrl, endpoint));
+  } catch {
+    throw new MemberActionError('MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED');
+  }
+  if (url.protocol !== 'https:' || !/(^|\.)weidian\.com$/i.test(url.hostname)) {
+    throw new MemberActionError(
+      'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED',
+      'Weidian HTTPS endpoint만 Member 쓰기에 사용할 수 있습니다.'
+    );
+  }
+  return url;
+}
+
+function normalizeBuyerIds(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new MemberActionError('SERVER_RESPONSE_INVALID', 'buyerIds가 비어 있습니다.');
+  const result = [...new Set(
+    value
+      .map((item) => String(item || '').trim())
+      .filter((item) => /^[A-Za-z0-9_-]{1,100}$/.test(item))
+  )].slice(0, 200);
+  if (!result.length) throw new MemberActionError('SERVER_RESPONSE_INVALID', 'buyerIds가 비어 있습니다.');
+  return result;
+}
+
+function normalizeMemberId(value: unknown): string {
+  const memberId = String(value || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(memberId)) {
+    throw new MemberActionError('SERVER_RESPONSE_INVALID', '선택한 Member 등급 ID가 올바르지 않습니다.');
+  }
+  return memberId;
+}
+
+function collectMemberLevelIds(value: unknown, depth = 0): string[] {
+  if (!value || depth > 6) return [];
+  if (Array.isArray(value)) {
+    return [...new Set(value.flatMap((item) => collectMemberLevelIds(item, depth + 1)))];
+  }
+  if (typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  const result: string[] = [];
+  for (const [key, child] of Object.entries(record).slice(0, 200)) {
+    if (/^(?:level|memberId|member_id)$/i.test(key)) {
+      const candidate = String(child ?? '').trim();
+      if (/^[A-Za-z0-9_-]{1,100}$/.test(candidate)) result.push(candidate);
+    }
+    if (child && typeof child === 'object') {
+      result.push(...collectMemberLevelIds(child, depth + 1));
+    }
+  }
+  return [...new Set(result)];
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -495,25 +400,9 @@ function finiteInteger(value: unknown): number | undefined {
   return Number.isInteger(numeric) ? numeric : undefined;
 }
 
-function addExpiresIn(issuedAtEpochMs: number, expiresIn: unknown): number | undefined {
-  const seconds = finiteNumber(expiresIn);
-  return seconds === undefined ? undefined : issuedAtEpochMs + Math.max(0, seconds) * 1_000;
-}
-
 function normalizeServerErrorCode(value: unknown, status: number): MemberErrorCode {
-  if (status === 401 || status === 403) return 'PERMISSION_DENIED';
-  const known = new Set<MemberErrorCode>([
-    'ACTION_TOKEN_EXPIRED',
-    'ACTION_TOKEN_INVALID',
-    'ACTION_TOKEN_ALREADY_USED',
-    'SESSION_CHANGED',
-    'SESSION_EXPIRED',
-    'SHOP_ID_MISMATCH',
-    'SERVER_INDEX_MISMATCH',
-    'PERMISSION_DENIED',
-    'SERVER_STATE_NOT_CHANGED'
-  ]);
-  return typeof value === 'string' && known.has(value as MemberErrorCode)
-    ? value as MemberErrorCode
-    : 'NETWORK_ERROR';
+  if (status === 401 || status === 403 || Number(value) === 401 || Number(value) === 403) {
+    return 'PERMISSION_DENIED';
+  }
+  return 'NETWORK_ERROR';
 }
