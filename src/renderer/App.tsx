@@ -23,6 +23,7 @@ import type {
   AppSettings,
   BrowserBridgeState,
   BrowserCommandType,
+  BrowserMemberApiContractObservation,
   BrowserMemberLevel,
   BrowserMemberPreview,
   BrowserPageSnapshot,
@@ -31,6 +32,15 @@ import type {
   SavedStore,
   TimeSyncSnapshot
 } from '../common/types';
+import {
+  createMemberSaveCurl,
+  createMemberSaveCurlTemplate,
+  createMemberSaveRequestJson,
+  DEFAULT_MEMBER_API_CONNECTION,
+  resolveMemberApiUrl,
+  type MemberApiConnectionSettings,
+  type MemberSaveRequestBody
+} from '../common/memberAnalysisContract';
 
 type MainTab = 'product' | 'reservation' | 'member' | 'settings';
 
@@ -130,7 +140,7 @@ export default function App(): JSX.Element {
     await run('Chrome 명령', () => window.ewWeidian.queueBrowserCommand(type, payload));
   }
 
-  if (!settings) return <div className="loading">노무현 준비 중</div>;
+  if (!settings) return <div className="loading">weidian 준비 중</div>;
 
   return (
     <main className="ew-shell">
@@ -138,7 +148,7 @@ export default function App(): JSX.Element {
         <div className="brand">
           <span className="brand-mark">店</span>
           <div>
-            <h1>노무현</h1>
+            <h1>weidian</h1>
             <p>Chrome 상품 뷰어 · 예약 주문 도우미</p>
           </div>
         </div>
@@ -278,6 +288,13 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
   const [memberActionBusy, setMemberActionBusy] = useState('');
   const [pendingMemberRequestId, setPendingMemberRequestId] = useState('');
   const [memberActionError, setMemberActionError] = useState('');
+  const [memberPagePending, setMemberPagePending] = useState<{
+    sourceUrl: string;
+    startedAtMs: number;
+  }>();
+  const [localMemberCheckApplied, setLocalMemberCheckApplied] = useState(false);
+  const [memberPostRequestId, setMemberPostRequestId] = useState(() => crypto.randomUUID());
+  const [buyerIdsText, setBuyerIdsText] = useState('');
   const stores = settings.savedStores.filter((store) =>
     `${store.name} ${store.memo} ${store.id}`.toLowerCase().includes(search.toLowerCase())
   );
@@ -291,7 +308,64 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
       ? '저장값'
       : '기본값';
   const memberServerState = snapshot?.memberServerState;
-  const actionToken = memberServerState?.actionToken;
+  const memberApiContracts = useMemo(
+    () => (bridge?.memberApiContracts || [])
+      .filter((contract) => !snapshot?.shopId || !contract.shopId || contract.shopId === snapshot.shopId)
+      .slice(0, 24),
+    [bridge?.memberApiContracts, snapshot?.shopId]
+  );
+  const latestWriteContract =
+    memberApiContracts.find(
+      (contract) =>
+        contract.method === 'GET' &&
+        /\/wdcrm\/trade\.setMemberLevel\/2\.0$/i.test(contract.url) &&
+        contract.source === 'chrome-web-request'
+    ) ||
+    memberApiContracts.find(
+      (contract) =>
+        contract.method === 'GET' &&
+        /\/wdcrm\/trade\.setMemberLevel\/2\.0$/i.test(contract.url)
+    );
+  const selectedMemberLevel = memberLevels[memberPreview.targetIndex];
+  const buyerIds = parseBuyerIds(
+    buyerIdsText || (snapshot?.buyerIds || []).join(',')
+  );
+  const memberPostPayload = useMemo<MemberSaveRequestBody | undefined>(() => {
+    if (!snapshot?.shopId || !memberServerState) return undefined;
+    const selectedGradeName =
+      memberLevels[memberPreview.targetIndex]?.label ||
+      memberPreview.name ||
+      memberPreview.levelLabel;
+    return {
+      shopId: snapshot.shopId,
+      buyerIds,
+      memberId: selectedMemberLevel?.id || '',
+      selectedServerIndex: memberPreview.targetIndex,
+      selectedGradeName
+    };
+  }, [
+    buyerIdsText,
+    memberLevels,
+    memberPreview.levelLabel,
+    memberPreview.name,
+    memberPreview.targetIndex,
+    memberServerState,
+    selectedMemberLevel?.id,
+    snapshot?.buyerIds,
+    snapshot?.shopId
+  ]);
+  const memberPostJson = memberPostPayload
+    ? createMemberSaveRequestJson(memberPostPayload)
+    : '';
+  const memberSaveEndpoint = resolveMemberApiUrl(
+    settings.browserMemberApi.baseUrl,
+    settings.browserMemberApi.saveEndpoint
+  );
+  const memberSaveCurlTemplate = createMemberSaveCurlTemplate(settings.browserMemberApi);
+  const memberPostCurl = memberPostPayload
+    ? createMemberSaveCurl(memberPostPayload, settings.browserMemberApi)
+    : memberSaveCurlTemplate;
+  const wdToken = memberServerState?.actionToken;
   const lastMemberResult = bridge?.lastMemberCommandResult;
   const isMemberPage = snapshot?.pageKind === 'member' && /mkt-h5-member-detail/i.test(snapshot.pageUrl);
   const chromeConnected = Boolean(bridge?.connected);
@@ -312,17 +386,24 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
     Boolean(memberServerState) &&
     hasValidServerIndex &&
     hasValidGradeCatalog;
-  const actionTokenReady =
-    actionToken?.status === 'ready' &&
-    actionToken.shopId === snapshot?.shopId &&
-    (actionToken.expiresAtEpochMs === undefined || actionToken.expiresAtEpochMs - Date.now() > 5_000);
+  const wdTokenReady =
+    wdToken?.status === 'ready' &&
+    wdToken.shopId === snapshot?.shopId &&
+    (wdToken.expiresAtEpochMs === undefined || wdToken.expiresAtEpochMs - Date.now() > 5_000);
+  const hasBuyerIds = buyerIds.length > 0;
+  const hasMemberLevelId = Boolean(
+    memberPostPayload?.memberId &&
+    selectedMemberLevel?.rawText === 'Weidian seller member catalog'
+  );
   const writeAdapterReady = memberServerState?.writeAdapter.status === 'configured';
   const targetChanged = memberPreview.targetIndex !== memberServerState?.serverIndex;
   const canSaveToServer =
     memberReadReady &&
     Number.isInteger(memberPreview.targetIndex) &&
-    actionTokenReady &&
+    wdTokenReady &&
     writeAdapterReady &&
+    hasBuyerIds &&
+    hasMemberLevelId &&
     !memberActionBusy &&
     targetChanged;
   const saveBlockers = [
@@ -330,7 +411,9 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
     !isMemberPage ? 'MEMBER_PAGE_NOT_DETECTED' : '',
     !hasShopId ? 'SHOP_ID_MISSING' : '',
     !hasValidServerIndex || !hasValidGradeCatalog ? 'MEMBER_READ_NOT_READY' : '',
-    !actionTokenReady ? `ACTION_TOKEN_${String(actionToken?.status || 'empty').toUpperCase().replace(/-/g, '_')}` : '',
+    !wdTokenReady ? `WDTOKEN_${String(wdToken?.status || 'empty').toUpperCase().replace(/-/g, '_')}` : '',
+    !hasBuyerIds ? 'BUYER_IDS_MISSING' : '',
+    !hasMemberLevelId ? 'SELLER_MEMBER_LEVEL_ID_MISSING' : '',
     !writeAdapterReady
       ? memberServerState?.writeAdapter.errorCode || 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
       : '',
@@ -340,7 +423,28 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
 
   useEffect(() => {
     setMemberActionError('');
-  }, [snapshot?.shopId]);
+    setLocalMemberCheckApplied(false);
+    setMemberPostRequestId(crypto.randomUUID());
+    setBuyerIdsText((snapshot?.buyerIds || []).join(','));
+  }, [snapshot?.shopId, snapshot?.buyerIds?.join(',')]);
+
+  useEffect(() => {
+    setMemberPostRequestId(crypto.randomUUID());
+  }, [memberPreview.targetIndex]);
+
+  useEffect(() => {
+    if (!memberPagePending || !snapshot?.shopId) return;
+    const observedAtMs = Date.parse(snapshot.observedAtIso);
+    if (!Number.isFinite(observedAtMs) || observedAtMs < memberPagePending.startedAtMs) return;
+    const pending = memberPagePending;
+    setMemberPagePending(undefined);
+    setMemberActionBusy('Member 페이지 자동 전환');
+    void window.ewWeidian.openMemberInChrome(pending.sourceUrl, snapshot.shopId)
+      .catch((caught) => {
+        setMemberActionError(caught instanceof Error ? caught.message : String(caught));
+      })
+      .finally(() => setMemberActionBusy(''));
+  }, [memberPagePending, snapshot?.observedAtIso, snapshot?.shopId]);
 
   useEffect(() => {
     if (!pendingMemberRequestId || lastMemberResult?.clientRequestId !== pendingMemberRequestId) return;
@@ -423,12 +527,16 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
     }
   }
 
-  function requestBase(): { shopId: string; targetPageUrl: string; clientRequestId: string } | undefined {
+  function requestBase(clientRequestId = crypto.randomUUID()): {
+    shopId: string;
+    targetPageUrl: string;
+    clientRequestId: string;
+  } | undefined {
     if (!snapshot?.shopId) return undefined;
     return {
       shopId: snapshot.shopId,
       targetPageUrl: snapshot.pageUrl,
-      clientRequestId: crypto.randomUUID()
+      clientRequestId
     };
   }
 
@@ -437,10 +545,10 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
     if (base) await queueMemberCommand('등급 동기화 요청', 'sync-vip-grades', base);
   }
 
-  async function refreshActionToken(): Promise<void> {
+  async function refreshWdToken(): Promise<void> {
     const base = requestBase();
     if (base) {
-      await queueMemberCommand('actionToken 갱신 요청', 'refresh-action-token', {
+      await queueMemberCommand('wdtoken 감지 요청', 'refresh-action-token', {
         ...base,
         action: 'save-vip-settings'
       });
@@ -448,28 +556,93 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
   }
 
   async function saveVipSettings(): Promise<void> {
-    const base = requestBase();
-    if (!base || !memberServerState) return;
+    const base = requestBase(memberPostRequestId);
+    if (!base || !memberServerState || !memberPostPayload) return;
     await queueMemberCommand('서버 저장 요청', 'save-vip-settings', {
       ...base,
+      buyerIds: memberPostPayload.buyerIds,
+      memberId: memberPostPayload.memberId,
       serverIndex: memberServerState.serverIndex,
-      targetIndex: memberPreview.targetIndex,
+      targetIndex: Number(memberPostPayload.selectedServerIndex),
       gradeCount: memberServerState.gradeCount,
-      gradeNames: memberServerState.gradeNames,
-      name: memberPreview.name,
+      gradeNames: [...memberServerState.gradeNames],
+      name: memberPostPayload.selectedGradeName,
       remaining: memberServerState.remaining,
       originalProgress: memberServerState.originalProgress
     });
+    setMemberPostRequestId(crypto.randomUUID());
   }
 
-  async function resetVipSettings(): Promise<void> {
-    const base = requestBase();
-    if (base) await queueMemberCommand('서버 초기화 요청', 'reset-vip-settings', base);
+  async function openMemberPage(): Promise<void> {
+    setMemberActionError('');
+    setMemberActionBusy('Member 페이지 판별');
+    try {
+      const startedAtMs = Date.now();
+      const result = await window.ewWeidian.openMemberInChrome(settings.browserUrl);
+      if (result.status === 'source-opened') {
+        setMemberPagePending({
+          sourceUrl: settings.browserUrl,
+          startedAtMs
+        });
+      } else {
+        setMemberPagePending(undefined);
+      }
+    } catch (caught) {
+      setMemberActionError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setMemberActionBusy('');
+    }
+  }
+
+  async function toggleLocalMemberCheck(): Promise<void> {
+    if (!snapshot?.shopId || !snapshot.pageUrl) {
+      setMemberActionError('먼저 Member 페이지를 열어 shopId를 확인해 주세요.');
+      return;
+    }
+    if (localMemberCheckApplied) {
+      await onQueue('restore-member-preview', {
+        shopId: snapshot.shopId,
+        targetPageUrl: snapshot.pageUrl
+      });
+      setLocalMemberCheckApplied(false);
+      return;
+    }
+    await onQueue('apply-member-preview', {
+      memberPreview,
+      shopId: snapshot.shopId,
+      serverIndex: memberPreview.serverIndex,
+      targetIndex: memberPreview.targetIndex,
+      targetPageUrl: snapshot.pageUrl
+    });
+    setLocalMemberCheckApplied(true);
   }
 
   return (
     <section className="compact-workspace" data-section={section}>
       <div className="column">
+        <Card title="Member 페이지 자동 판별" className="member-only">
+          <label>
+            상점 판매 페이지 또는 Member 링크
+            <input
+              value={settings.browserUrl}
+              placeholder="Weidian 판매 페이지 링크를 붙여넣으세요"
+              onChange={(event) => void onSave({ browserUrl: event.target.value })}
+            />
+          </label>
+          <button
+            className="primary full"
+            onClick={() => void openMemberPage()}
+            disabled={!settings.browserUrl || Boolean(memberActionBusy)}
+          >
+            <ExternalLink size={14} /> Member 페이지 열기
+          </button>
+          <p className="subtle">
+            {memberPagePending
+              ? '판매 페이지에서 shopId를 감지한 뒤 Member 페이지로 자동 전환합니다.'
+              : '직접 Member 링크면 즉시 열고, 판매 링크면 shopId 감지 후 Member 주소를 만듭니다.'}
+          </p>
+        </Card>
+
         <Card title="상품 열기" className="product-only">
           <label>
             URL
@@ -495,6 +668,20 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
               간소화 창
             </label>
           </div>
+          <label>
+            대상 buyerIds
+            <input
+              value={buyerIdsText}
+              onChange={(event) => setBuyerIdsText(event.target.value)}
+              placeholder="구매자 ID를 쉼표로 구분"
+              spellCheck={false}
+            />
+          </label>
+          <KeyValue
+            label="선택 Member 등급 ID"
+            value={selectedMemberLevel?.id || '-'}
+            tone={hasMemberLevelId ? 'green' : 'amber'}
+          />
           <div className="button-row">
             <button onClick={() => window.ewWeidian.copyText(settings.browserUrl)}>
               <Copy size={14} /> URL 복사
@@ -603,7 +790,7 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
       </div>
 
       <div className="column">
-        <Card title="VIP 로컬 화면 미리보기" className="member-only">
+        <Card title="VIP 로컬 확인" className="member-only">
           <div className="safe-note">
             <ShieldCheck size={15} /> 로컬 화면 표시만 바뀝니다. 서버 회원등급과 실제 주문 가격은 변경되지 않습니다.
           </div>
@@ -646,37 +833,103 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
             value={memberServerState ? String(memberServerState.serverIndex) : '-'}
           />
           <KeyValue label="선택 targetIndex" value={String(memberPreview.targetIndex)} tone="green" />
-          <div className="button-row">
-            <button
-              className="primary"
-              onClick={() =>
-                onQueue('apply-member-preview', {
-                  memberPreview,
-                  shopId: snapshot?.shopId,
-                  serverIndex: memberPreview.serverIndex,
-                  targetIndex: memberPreview.targetIndex,
-                  targetPageUrl: snapshot?.pageUrl
-                })
-              }
-            >
-              <UserRound size={14} /> 로컬 화면에만 적용
-            </button>
-            <button
-              onClick={() =>
-                onQueue('restore-member-preview', {
-                  shopId: snapshot?.shopId,
-                  targetPageUrl: snapshot?.pageUrl
-                })
-              }
-            >
-              로컬 원복
-            </button>
-          </div>
+          <button
+            className="primary full"
+            onClick={() => void toggleLocalMemberCheck()}
+            disabled={!isMemberPage}
+          >
+            <UserRound size={14} /> {localMemberCheckApplied ? '로컬 확인 해제' : '로컬 확인'}
+          </button>
         </Card>
 
-        <Card title="Member 읽기 · actionToken · 서버 저장" className="member-only">
+        <Card title="실제 판매자 GET 전송 방식" className="member-only">
           <div className="safe-note">
-            <ShieldCheck size={15} /> 실제 Weidian 페이지 읽기와 actionToken 관찰은 쓰기 API 설정과 독립적으로 동작합니다. 쓰기 endpoint가 없으면 저장 단계만 차단합니다.
+            <ShieldCheck size={15} /> Cookie와 wdtoken 원문은 Renderer·설정·로그에 저장하지 않고 Chrome 확장 메모리에서만 사용합니다.
+          </div>
+          <KeyValue label="설정된 GET endpoint" value={memberSaveEndpoint} tone="green" />
+          <KeyValue label="인증 방식" value="Chrome Cookie + query wdtoken" />
+          {memberPostPayload ? (
+            <>
+              <KeyValue
+                label="선택 VIP"
+                value={`${memberPostPayload.selectedGradeName} · serverIndex ${memberPostPayload.selectedServerIndex}`}
+                tone="green"
+              />
+              <KeyValue label="param.memberId" value={memberPostPayload.memberId || '-'} tone={hasMemberLevelId ? 'green' : 'amber'} />
+              <KeyValue label="param.buyerIds" value={memberPostPayload.buyerIds.join(', ') || '-'} tone={hasBuyerIds ? 'green' : 'amber'} />
+              <pre className="curl-template">{memberPostJson}</pre>
+              <div className="button-row">
+                <button onClick={() => window.ewWeidian.copyText(memberPostJson)}>
+                  <Copy size={14} /> JSON 복사
+                </button>
+                <button onClick={() => window.ewWeidian.copyText(memberPostCurl)}>
+                  <Copy size={14} /> cURL 복사
+                </button>
+              </div>
+              <pre className="curl-template">{memberPostCurl}</pre>
+              <p className="subtle">
+                `_selection`은 화면 확인용이며 실제 GET의 `param`에는 buyerIds와 memberId만 전송됩니다.
+              </p>
+            </>
+          ) : (
+            <>
+              <pre className="curl-template">{memberSaveCurlTemplate}</pre>
+              <button
+                className="full"
+                onClick={() => window.ewWeidian.copyText(memberSaveCurlTemplate)}
+              >
+                <Copy size={14} /> 기본 cURL 복사
+              </button>
+              <p className="subtle">
+                Member 동기화가 완료되면 읽어온 VIP 목록과 셀렉박스 선택값으로 JSON이 생성됩니다.
+              </p>
+            </>
+          )}
+          {latestWriteContract ? (
+            <div className="observed-contract">
+              <p className="subtle">Chrome에서 관찰된 최근 실제 쓰기 요청</p>
+              <KeyValue label="Method" value={latestWriteContract.method} tone="green" />
+              <KeyValue label="Endpoint" value={latestWriteContract.url} />
+              <KeyValue
+                label="Content-Type"
+                value={latestWriteContract.requestHeaderMetadata?.contentType || 'GET query'}
+              />
+              <KeyValue label="wdtoken 위치" value={latestWriteContract.tokenPlacement} />
+              <KeyValue
+                label="Chrome 세션"
+                value={latestWriteContract.chromeSessionCookie ? 'Cookie 포함 감지' : 'Cookie 미감지'}
+              />
+              <KeyValue
+                label="Query 필드"
+                value={latestWriteContract.queryKeys.join(', ') || '-'}
+              />
+              <KeyValue
+                label="응답 필드"
+                value={contractShapeKeys(latestWriteContract.responseBodyShape)}
+              />
+              <button
+                className="full"
+                onClick={() => window.ewWeidian.copyText(latestWriteContract.curlTemplate)}
+              >
+                <Copy size={14} /> cURL 템플릿 복사
+              </button>
+              <p className="subtle">
+                최근 관찰 {latestWriteContract.sampleCount}회 · HTTP {latestWriteContract.status || '-'} · {latestWriteContract.source}
+              </p>
+            </div>
+          ) : null}
+          {memberApiContracts.length > 1 ? (
+            <div className="member-contract-list">
+              {memberApiContracts.slice(0, 12).map((contract) => (
+                <MemberApiContractRow contract={contract} key={contract.id} />
+              ))}
+            </div>
+          ) : null}
+        </Card>
+
+        <Card title="Member 읽기 · wdtoken · GET 전송" className="member-only">
+          <div className="safe-note">
+            <ShieldCheck size={15} /> 판매자 요청에서 wdtoken과 실제 등급 카탈로그를 감지한 뒤 로그인된 판매자 탭에서 GET을 실행합니다.
           </div>
           <KeyValue label="Chrome 연결" value={chromeConnected ? '완료' : '미연결'} tone={chromeConnected ? 'green' : 'amber'} />
           <KeyValue label="Member 페이지" value={isMemberPage ? '감지 완료' : '미감지'} tone={isMemberPage ? 'green' : 'amber'} />
@@ -709,23 +962,23 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
             label="마지막 동기화"
             value={memberServerState ? new Date(memberServerState.syncedAtIso).toLocaleTimeString('ko-KR') : '-'}
           />
-          <KeyValue label="actionToken 상태" value={actionToken?.status || 'empty'} tone={actionTokenReady ? 'green' : 'amber'} />
-          <KeyValue label="fingerprint" value={actionToken?.tokenFingerprint || '-'} />
-          <KeyValue label="oneTime" value={actionToken?.oneTime ? '예' : '아니오'} />
+          <KeyValue label="wdtoken 상태" value={wdToken?.status || 'empty'} tone={wdTokenReady ? 'green' : 'amber'} />
+          <KeyValue label="fingerprint" value={wdToken?.tokenFingerprint || '-'} />
+          <KeyValue label="일회성 여부" value={wdToken?.oneTime ? '예' : '아니오 · 세션 토큰'} />
           <KeyValue
-            label="발급 시각"
-            value={actionToken?.issuedAtEpochMs ? new Date(actionToken.issuedAtEpochMs).toLocaleTimeString('ko-KR') : '-'}
+            label="감지 시각"
+            value={wdToken?.issuedAtEpochMs ? new Date(wdToken.issuedAtEpochMs).toLocaleTimeString('ko-KR') : '-'}
           />
           <KeyValue
             label="예상 만료"
-            value={actionToken?.expiresAtEpochMs ? new Date(actionToken.expiresAtEpochMs).toLocaleTimeString('ko-KR') : '-'}
+            value={wdToken?.expiresAtEpochMs ? new Date(wdToken.expiresAtEpochMs).toLocaleTimeString('ko-KR') : '응답에 명시되지 않음'}
           />
-          <KeyValue label="남은 시간" value={formatTokenRemaining(actionToken?.expiresAtEpochMs)} />
+          <KeyValue label="남은 시간" value={formatTokenRemaining(wdToken?.expiresAtEpochMs)} />
           <KeyValue
-            label="쓰기 API"
+            label="GET endpoint"
             value={
               writeAdapterReady
-                ? '설정 완료'
+                ? memberSaveEndpoint
                 : memberServerState?.writeAdapter.errorCode || 'MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED'
             }
             tone={writeAdapterReady ? 'green' : 'amber'}
@@ -735,17 +988,17 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
             value={canSaveToServer ? '활성화' : '비활성화'}
             tone={canSaveToServer ? 'green' : 'amber'}
           />
-          <KeyValue label="마지막 오류" value={actionToken?.lastErrorCode || lastMemberResult?.errorCode || '-'} />
-          {actionToken?.lastErrorMessage || lastMemberResult?.errorMessage ? (
-            <div className="error-bar">{actionToken?.lastErrorMessage || lastMemberResult?.errorMessage}</div>
+          <KeyValue label="마지막 오류" value={wdToken?.lastErrorCode || lastMemberResult?.errorCode || '-'} />
+          {wdToken?.lastErrorMessage || lastMemberResult?.errorMessage ? (
+            <div className="error-bar">{wdToken?.lastErrorMessage || lastMemberResult?.errorMessage}</div>
           ) : null}
           {memberActionError ? <div className="error-bar">{memberActionError}</div> : null}
           <div className="button-row">
             <button onClick={() => void syncVipGrades()} disabled={!isMemberPage || Boolean(memberActionBusy)}>
               <RefreshCw size={14} /> 등급 동기화
             </button>
-            <button onClick={() => void refreshActionToken()} disabled={!memberReadReady || Boolean(memberActionBusy)}>
-              actionToken 새로고침
+            <button onClick={() => void refreshWdToken()} disabled={!memberReadReady || Boolean(memberActionBusy)}>
+              wdtoken 다시 감지
             </button>
             <button
               className="primary grow"
@@ -753,20 +1006,14 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
               disabled={!canSaveToServer}
               title={saveBlockers.join(', ')}
             >
-              <Save size={14} /> 서버 저장
-            </button>
-            <button
-              onClick={() => void resetVipSettings()}
-              disabled={!memberReadReady || !writeAdapterReady || !actionTokenReady || Boolean(memberActionBusy)}
-            >
-              서버 설정 초기화
+              <Save size={14} /> GET 저장
             </button>
           </div>
           <p className="subtle">
             {memberActionBusy || (
               saveBlockers.length
                 ? `저장 차단 사유: ${saveBlockers.join(' · ')}`
-                : '읽기·토큰·쓰기 어댑터가 모두 준비되었습니다.'
+                : '읽기·wdtoken·buyerIds·판매자 등급 ID가 모두 준비되었습니다.'
             )}
           </p>
         </Card>
@@ -779,6 +1026,8 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
             주문 확인 화면의 서버 가격이 최종 기준입니다. VIP 미리보기 값은 주문 요청에 포함되지 않습니다.
           </p>
         </Card>
+
+        <MemberApiSettingsCard settings={settings.browserMemberApi} onSave={onSave} />
 
         <Card title="워터마크" className="settings-only">
           <label className="check line">
@@ -811,6 +1060,154 @@ function ViewerWorkspace(props: ViewerWorkspaceProps): JSX.Element {
       </div>
     </section>
   );
+}
+
+function MemberApiSettingsCard({
+  settings,
+  onSave
+}: {
+  settings: MemberApiConnectionSettings;
+  onSave: (patch: Partial<AppSettings>) => Promise<AppSettings | undefined>;
+}): JSX.Element {
+  const [draft, setDraft] = useState<MemberApiConnectionSettings>({ ...settings });
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    setDraft({ ...settings });
+  }, [
+    settings.baseUrl,
+    settings.bulkSaveEndpoint,
+    settings.catalogEndpoint,
+    settings.saveEndpoint,
+    settings.verifyEndpoint
+  ]);
+
+  function update(key: keyof MemberApiConnectionSettings, value: string): void {
+    setStatus('');
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function persist(): Promise<void> {
+    const validationError = validateMemberApiDraft(draft);
+    if (validationError) {
+      setStatus(validationError);
+      return;
+    }
+    setStatus('저장 중');
+    const saved = await onSave({ browserMemberApi: draft });
+    if (!saved) {
+      setStatus('저장 실패');
+      return;
+    }
+    setDraft({ ...saved.browserMemberApi });
+    setStatus('저장 완료 · 확장에 자동 적용');
+  }
+
+  return (
+    <Card title="Member API 연결" className="settings-only">
+      <p className="subtle">
+        실제 판매자 페이지에서 확인한 Weidian GET endpoint입니다. 상대 경로나 Weidian HTTPS 전체 URL을 입력할 수 있습니다.
+      </p>
+      <label>
+        API Base URL
+        <input
+          value={draft.baseUrl}
+          onChange={(event) => update('baseUrl', event.target.value)}
+          placeholder="https://thor.weidian.com"
+          spellCheck={false}
+        />
+      </label>
+      <label>
+        판매자 등급 카탈로그 endpoint
+        <input
+          value={draft.catalogEndpoint}
+          onChange={(event) => update('catalogEndpoint', event.target.value)}
+          placeholder="/wdcrm/trade.searchMemberByShopId/1.0"
+          spellCheck={false}
+        />
+      </label>
+      <label>
+        개별 회원 등급 변경 endpoint
+        <input
+          value={draft.saveEndpoint}
+          onChange={(event) => update('saveEndpoint', event.target.value)}
+          placeholder="/wdcrm/trade.setMemberLevel/2.0"
+          spellCheck={false}
+        />
+      </label>
+      <label>
+        검색조건 일괄 변경 endpoint
+        <input
+          value={draft.bulkSaveEndpoint}
+          onChange={(event) => update('bulkSaveEndpoint', event.target.value)}
+          placeholder="/wdcrm/trade.setMemberLevelWithSearchCondition/2.0"
+          spellCheck={false}
+        />
+      </label>
+      <label>
+        저장 후 재조회 endpoint
+        <input
+          value={draft.verifyEndpoint}
+          onChange={(event) => update('verifyEndpoint', event.target.value)}
+          placeholder="/wdcrm/customer.summary.pc/1.0"
+          spellCheck={false}
+        />
+      </label>
+      <KeyValue
+        label="저장 URL 미리보기"
+        value={safeMemberApiUrl(draft.baseUrl, draft.saveEndpoint)}
+      />
+      <div className="button-row">
+        <button
+          onClick={() => {
+            setDraft({ ...DEFAULT_MEMBER_API_CONNECTION });
+            setStatus('기본값 입력됨 · 저장 필요');
+          }}
+        >
+          기본값
+        </button>
+        <button className="primary grow" onClick={() => void persist()}>
+          <Save size={14} /> 저장 및 적용
+        </button>
+      </div>
+      {status ? <p className="subtle">{status}</p> : null}
+    </Card>
+  );
+}
+
+function safeMemberApiUrl(baseUrl: string, endpoint: string): string {
+  try {
+    return resolveMemberApiUrl(baseUrl, endpoint);
+  } catch {
+    return 'URL 형식을 확인하세요.';
+  }
+}
+
+function validateMemberApiDraft(value: MemberApiConnectionSettings): string {
+  try {
+    const base = new URL(value.baseUrl);
+    if (base.protocol !== 'https:' || !/(^|\.)weidian\.com$/i.test(base.hostname)) {
+      return 'Base URL은 Weidian HTTPS URL이어야 합니다.';
+    }
+  } catch {
+    return 'Base URL 형식을 확인하세요.';
+  }
+  for (const [label, endpoint] of [
+    ['등급 카탈로그', value.catalogEndpoint],
+    ['개별 저장', value.saveEndpoint],
+    ['검색조건 일괄 저장', value.bulkSaveEndpoint],
+    ['저장 후 재조회', value.verifyEndpoint]
+  ] as const) {
+    if (!endpoint.startsWith('/') && !/^https?:\/\//i.test(endpoint)) {
+      return `${label} endpoint는 /로 시작하는 경로나 완전한 URL이어야 합니다.`;
+    }
+    try {
+      resolveMemberApiUrl(value.baseUrl, endpoint);
+    } catch {
+      return `${label} endpoint 형식을 확인하세요.`;
+    }
+  }
+  return '';
 }
 
 interface ReservationWorkspaceProps {
@@ -1015,6 +1412,30 @@ function Empty({ children }: { children: ReactNode }): JSX.Element {
   return <div className="empty">{children}</div>;
 }
 
+function MemberApiContractRow({
+  contract
+}: {
+  contract: BrowserMemberApiContractObservation;
+}): JSX.Element {
+  return (
+    <div className="member-contract-row">
+      <div>
+        <strong>{contract.method} · {contract.status || '-'}</strong>
+        <span>{contract.url}</span>
+      </div>
+      <small>{contract.tokenPlacement} · {contract.sampleCount}회</small>
+    </div>
+  );
+}
+
+function contractShapeKeys(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    return typeof value === 'string' ? value : '-';
+  }
+  const keys = Object.keys(value as Record<string, unknown>);
+  return keys.length ? keys.slice(0, 24).join(', ') : '-';
+}
+
 function LogRail({ logs }: { logs: LogEntry[] }): JSX.Element {
   const latest = logs.at(-1);
   return (
@@ -1036,9 +1457,12 @@ function defaultMemberLevels(): BrowserMemberLevel[] {
 function memberLevelsFor(settings: AppSettings, snapshot: BrowserPageSnapshot | undefined): BrowserMemberLevel[] {
   if (snapshot?.memberServerState?.gradeNames.length) {
     return snapshot.memberServerState.gradeNames.map((label, index) => ({
-      id: `server-grade-${index}`,
+      id:
+        snapshot.memberLevels.find((level) => level.label === label)?.id ||
+        `server-grade-${index}`,
       label,
-      rank: index + 1
+      rank: index + 1,
+      rawText: snapshot.memberLevels.find((level) => level.label === label)?.rawText
     }));
   }
   const detected = snapshot?.memberLevels || [];
@@ -1047,6 +1471,15 @@ function memberLevelsFor(settings: AppSettings, snapshot: BrowserPageSnapshot | 
   }
   const stored = snapshot?.shopId ? settings.browserMemberLevelsByShop[snapshot.shopId] : undefined;
   return stored?.length ? stored : defaultMemberLevels();
+}
+
+function parseBuyerIds(value: string): string[] {
+  return [...new Set(
+    value
+      .split(/[\s,;]+/)
+      .map((item) => item.trim())
+      .filter((item) => /^[A-Za-z0-9_-]{1,100}$/.test(item))
+  )].slice(0, 200);
 }
 
 function selectedMemberPreview(

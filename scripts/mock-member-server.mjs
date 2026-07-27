@@ -9,9 +9,9 @@ const mode = readMode(process.env.MEMBER_LAB_MODE);
 const { server } = createMemberSecurityLabServer({ mode });
 
 server.listen(port, host, () => {
-  console.log(`노무현 Member 보안 랩 (${mode}): http://${host}:${port}`);
+  console.log(`weidian Member 보안 랩 (${mode}): http://${host}:${port}`);
   console.log('세션 쿠키·actionToken 원문은 로그에 기록하지 않습니다.');
-  console.log('실제 Weidian 쓰기 어댑터: disabled (MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED)');
+  console.log('고정 POST: /api/member/context · /api/member/action-token · /api/member/save · /api/member/reset');
 });
 
 function readMode(value) {

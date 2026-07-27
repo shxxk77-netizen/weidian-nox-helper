@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // extension/src/member/action-token-detector.ts
-  var ACTION_TOKEN_KEY = /^(?:x[-_])?action[-_]?token$/i;
+  var ACTION_TOKEN_KEY = /^(?:(?:x[-_])?action[-_]?token|wdtoken)$/i;
   var MAX_DEPTH = 6;
   var MAX_OBJECT_KEYS = 160;
   var MAX_TOKEN_LENGTH = 4096;
@@ -40,7 +40,7 @@
               action: inferMemberAction(value, options.url),
               issuedAtEpochMs: metadata.issuedAtEpochMs,
               expiresAtEpochMs: metadata.expiresAtEpochMs,
-              oneTime: metadata.oneTime,
+              oneTime: /^wdtoken$/i.test(key) ? false : metadata.oneTime,
               source: options.placement === "bootstrap" ? "page-bootstrap" : options.placement === "response" ? "network-response" : "network-request"
             });
           }
@@ -155,6 +155,28 @@
     window.addEventListener("message", async (event) => {
       if (event.source !== window || event.origin !== location.origin) return;
       const message = event.data;
+      if (message?.source === "EW_WEIDIAN_CONTENT" && message.type === "EW_EXECUTE_MEMBER_PAGE_REQUEST" && message.requestId) {
+        try {
+          const payload = await executeMemberPageRequest(message.request);
+          window.postMessage({
+            source: "EW_WEIDIAN_PAGE_MAIN",
+            type: "EW_MEMBER_PAGE_REQUEST_RESULT",
+            requestId: message.requestId,
+            ok: true,
+            payload
+          }, location.origin);
+        } catch (error) {
+          window.postMessage({
+            source: "EW_WEIDIAN_PAGE_MAIN",
+            type: "EW_MEMBER_PAGE_REQUEST_RESULT",
+            requestId: message.requestId,
+            ok: false,
+            errorCode: error?.code || "NETWORK_ERROR",
+            errorMessage: sanitizeMessage(error instanceof Error ? error.message : String(error))
+          }, location.origin);
+        }
+        return;
+      }
       if (message?.source !== "EW_WEIDIAN_CONTENT" || !REQUEST_TYPES.has(message.type) || !message.requestId) return;
       try {
         if (message.type === "EW_MEMBER_TOKEN_REFRESH" || message.type === "EW_MEMBER_TOKEN_SCAN") {
@@ -177,6 +199,36 @@
         }, location.origin);
       }
     });
+    async function executeMemberPageRequest(request) {
+      const url = new URL(String(request?.url || ""));
+      if (request?.method !== "GET" || url.protocol !== "https:" || url.hostname !== "thor.weidian.com" || ![
+        "/wdcrm/trade.setMemberLevel/2.0",
+        "/wdcrm/customer.summary.pc/1.0"
+      ].includes(url.pathname) || !url.searchParams.get("wdtoken") || !url.searchParams.get("param")) {
+        throw codedError("MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED", "\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uC740 Member \uC694\uCCAD\uC785\uB2C8\uB2E4.");
+      }
+      const response = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json, text/plain, */*"
+        }
+      });
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw codedError("SERVER_RESPONSE_INVALID", "Weidian API\uAC00 JSON\uC744 \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.");
+      }
+      if (!response.ok) {
+        throw codedError(
+          response.status === 401 || response.status === 403 ? "PERMISSION_DENIED" : "NETWORK_ERROR",
+          payload?.status?.message || `HTTP ${response.status}`
+        );
+      }
+      return payload;
+    }
     async function collectMemberContext() {
       const url = new URL(location.href);
       if (url.protocol !== "https:" || !/(^|\.)weidian\.com$/i.test(url.hostname) || !/mkt-h5-member-detail/i.test(url.pathname)) {
@@ -297,10 +349,12 @@
       return error;
     }
     function sanitizeMessage(message) {
-      return String(message).replace(/\b(actionToken|token|cookie|authorization|ct|session)\b\s*[:=]\s*([^\s,;]+)/gi, "$1=[REDACTED]").slice(0, 400);
+      return String(message).replace(/\b(actionToken|wdtoken|token|cookie|authorization|ct|session)\b\s*[:=]\s*([^\s,;]+)/gi, "$1=[REDACTED]").slice(0, 400);
     }
     function installMemberApiContractObserver() {
-      if (window.__EW_MEMBER_API_CONTRACT_OBSERVER__ || location.protocol !== "https:" || !/(^|\.)weidian\.com$/i.test(location.hostname) || !/(?:mkt-h5-member-detail|decoration\/uni-mine)/i.test(location.pathname)) {
+      if (window.__EW_MEMBER_API_CONTRACT_OBSERVER__ || location.protocol !== "https:" || !/(^|\.)weidian\.com$/i.test(location.hostname) || !/(?:mkt-h5-member-detail|decoration\/uni-mine|pc-vue-customer|mkt-pc-member|weidian-loader)/i.test(
+        `${location.pathname}${location.hash}`
+      )) {
         return;
       }
       window.__EW_MEMBER_API_CONTRACT_OBSERVER__ = true;
@@ -364,9 +418,10 @@
           queryKeys: [],
           requestHeaderNames: []
         };
+        const { requestHeaders: rawRequestHeaders, ...safeRequest } = request;
         const requestBodyShape = describeBody(body);
         const requestHeaderNames = request.requestHeaderNames || [];
-        emitRequestTokenCandidates(request.url, request.requestHeaders, body);
+        emitRequestTokenCandidates(request.url, rawRequestHeaders, body);
         this.addEventListener("loadend", () => {
           let responseBodyShape;
           let responseValue;
@@ -378,6 +433,7 @@
           }
           if (responseValue !== void 0) {
             observeMemberState(request.url, responseValue);
+            observeSellerMemberCatalog(request.url, responseValue);
             emitDetectedTokens(
               detectActionTokens(responseValue, {
                 placement: "response",
@@ -387,7 +443,7 @@
           }
           emitContract({
             transport: "xhr",
-            ...request,
+            ...safeRequest,
             requestBodyShape,
             requestHeaderNames,
             tokenPlacement: detectTokenPlacement(
@@ -571,6 +627,37 @@
         stateSource: "weidian-network"
       };
     }
+    function observeSellerMemberCatalog(requestUrl, payload) {
+      let url;
+      try {
+        url = new URL(String(requestUrl || ""), location.href);
+      } catch {
+        return;
+      }
+      if (!/\/wdcrm\/trade\.searchMemberByShopId\/1\.0$/i.test(url.pathname)) return;
+      const datas = payload?.result?.datas || payload?.data?.result?.datas;
+      if (!Array.isArray(datas)) return;
+      const seen = /* @__PURE__ */ new Set();
+      const memberLevels = datas.flatMap((item, index) => {
+        const id = String(item?.level ?? "").trim();
+        const label = normalize(item?.name || item?.levelName || item?.memberName);
+        if (!id || !label || !/^[A-Za-z0-9_-]{1,100}$/.test(id) || seen.has(id)) {
+          return [];
+        }
+        seen.add(id);
+        return [{
+          id,
+          label,
+          rank: index + 1
+        }];
+      }).slice(0, 30);
+      if (!memberLevels.length) return;
+      window.postMessage({
+        source: "EW_WEIDIAN_PAGE_MAIN",
+        type: "EW_SELLER_MEMBER_CATALOG",
+        memberLevels
+      }, location.origin);
+    }
     function unwrapMemberResult(payload) {
       if (!payload || typeof payload !== "object") return void 0;
       if (payload.result && typeof payload.result === "object") return payload.result;
@@ -626,6 +713,7 @@
       }
       if (responseValue !== void 0) {
         observeMemberState(requestUrl, responseValue);
+        observeSellerMemberCatalog(requestUrl, responseValue);
         emitDetectedTokens(
           detectActionTokens(responseValue, {
             placement: "response",
@@ -674,12 +762,12 @@
     function describeBody(body) {
       if (body === void 0 || body === null) return void 0;
       if (body instanceof URLSearchParams) {
-        return Object.fromEntries([.../* @__PURE__ */ new Set([...body.keys()])].sort().map((key) => [key, "string"]));
+        return describeSearchParams(body);
       }
       if (body instanceof FormData) {
         const result = {};
         for (const [key, value] of body.entries()) {
-          result[key] = typeof value === "string" ? "string" : "file";
+          result[key] = typeof value === "string" ? describeEncodedValue(value) : "file";
         }
         return result;
       }
@@ -690,7 +778,7 @@
           try {
             const params = new URLSearchParams(body);
             if ([...params.keys()].length) {
-              return Object.fromEntries([.../* @__PURE__ */ new Set([...params.keys()])].sort().map((key) => [key, "string"]));
+              return describeSearchParams(params);
             }
           } catch {
           }
@@ -713,7 +801,7 @@
       return result;
     }
     function detectTokenPlacement(queryKeys, headerNames, bodyShape, queryShape) {
-      const isActionTokenKey = (key) => /^(?:x-)?action[-_]?token$/i.test(String(key));
+      const isActionTokenKey = (key) => /^(?:(?:x-)?action[-_]?token|wdtoken)$/i.test(String(key));
       if (queryKeys.some(isActionTokenKey)) return "query";
       if (containsShapeKey(queryShape, isActionTokenKey)) return "query";
       if (headerNames.some(isActionTokenKey)) return "header";

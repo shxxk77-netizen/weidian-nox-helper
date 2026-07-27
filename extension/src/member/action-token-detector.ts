@@ -19,7 +19,7 @@ export interface DetectActionTokenOptions {
   now?: number;
 }
 
-const ACTION_TOKEN_KEY = /^(?:x[-_])?action[-_]?token$/i;
+const ACTION_TOKEN_KEY = /^(?:(?:x[-_])?action[-_]?token|wdtoken)$/i;
 const MAX_DEPTH = 6;
 const MAX_OBJECT_KEYS = 160;
 const MAX_TOKEN_LENGTH = 4096;
@@ -70,7 +70,7 @@ export function detectActionTokens(
             action: inferMemberAction(value, options.url),
             issuedAtEpochMs: metadata.issuedAtEpochMs,
             expiresAtEpochMs: metadata.expiresAtEpochMs,
-            oneTime: metadata.oneTime,
+            oneTime: /^wdtoken$/i.test(key) ? false : metadata.oneTime,
             source:
               options.placement === 'bootstrap'
                 ? 'page-bootstrap'

@@ -15,6 +15,7 @@ import type {
   BrowserCommandType,
   BrowserMemberLevel,
   BrowserMemberPreview,
+  MemberPageOpenResult,
   BrowserReservationRequest,
   SavedStore
 } from '../common/types';
@@ -23,9 +24,9 @@ import { AppLogger } from './logger';
 import { TimeSyncManager } from './timeSync';
 import { BrowserBridgeService } from './browserBridge';
 import { BrowserReservationRunner } from './browserReservation';
-import { extractWeidianUrl } from '../common/weidianUrl';
+import { extractWeidianUrl, resolveWeidianMemberPageUrl } from '../common/weidianUrl';
 
-app.setName('노무현');
+app.setName('weidian');
 
 let mainWindow: BrowserWindow | undefined;
 let configStore: ConfigStore;
@@ -39,17 +40,17 @@ function installApplicationMenu(): void {
   if (process.platform !== 'darwin') return;
   const template: MenuItemConstructorOptions[] = [
     {
-      label: '노무현',
+      label: 'weidian',
       submenu: [
-        { role: 'about', label: '노무현 정보' },
+        { role: 'about', label: 'weidian 정보' },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
-        { role: 'hide', label: '노무현 가리기' },
+        { role: 'hide', label: 'weidian 가리기' },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit', label: '노무현 종료' }
+        { role: 'quit', label: 'weidian 종료' }
       ]
     },
     {
@@ -100,7 +101,7 @@ function createWindow(): void {
     height: 760,
     minWidth: 420,
     minHeight: 620,
-    title: '노무현',
+    title: 'weidian',
     backgroundColor: '#0b0c0f',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
@@ -152,6 +153,35 @@ function registerIpc(): void {
     openChrome(parsed.toString(), saved.browserCompactWindow);
     logger.info(`Chrome에서 페이지 열기: ${parsed.toString()}`, 'browser');
   });
+  ipcMain.handle(
+    'browser:open-member-url',
+    async (_event, url: string, detectedShopId?: string): Promise<MemberPageOpenResult> => {
+      const resolved = resolveWeidianMemberPageUrl(url, detectedShopId);
+      const saved = configStore.save({ browserUrl: resolved.sourceUrl.toString() });
+      if (resolved.memberUrl && resolved.shopId) {
+        openChrome(resolved.memberUrl.toString(), saved.browserCompactWindow);
+        logger.info('Member 페이지 자동 판별 완료', 'browser', {
+          sourceUrl: resolved.sourceUrl.toString(),
+          memberUrl: resolved.memberUrl.toString(),
+          shopId: resolved.shopId
+        });
+        return {
+          status: 'member-opened',
+          openedUrl: resolved.memberUrl.toString(),
+          memberUrl: resolved.memberUrl.toString(),
+          shopId: resolved.shopId
+        };
+      }
+      openChrome(resolved.sourceUrl.toString(), saved.browserCompactWindow);
+      logger.info('판매 페이지를 열고 shopId 감지 대기', 'browser', {
+        sourceUrl: resolved.sourceUrl.toString()
+      });
+      return {
+        status: 'source-opened',
+        openedUrl: resolved.sourceUrl.toString()
+      };
+    }
+  );
   ipcMain.handle('browser:show-extension-folder', () => {
     shell.showItemInFolder(path.join(extensionDir, 'manifest.json'));
   });
@@ -233,7 +263,7 @@ function ensureExtensionFiles(userData: string): string {
   if (!source) {
     throw new Error('Chrome 확장 프로그램 파일을 찾을 수 없습니다.');
   }
-  const destination = path.join(userData, 'ew-weidian-chrome-extension');
+  const destination = path.join(userData, 'weidian-chrome-extension');
   fs.mkdirSync(destination, { recursive: true });
   fs.cpSync(source, destination, { recursive: true, force: true });
   return destination;
@@ -297,7 +327,7 @@ app.whenReady().then(() => {
   const userData = app.getPath('userData');
   extensionDir = ensureExtensionFiles(userData);
   configStore = new ConfigStore(path.join(userData, 'config.json'));
-  logger = new AppLogger(path.join(userData, 'logs', 'ew-weidian.log'));
+  logger = new AppLogger(path.join(userData, 'logs', 'weidian.log'));
   timeSync = new TimeSyncManager(logger);
   browserReservation = new BrowserReservationRunner(logger, {
     getServerOffsetMs: () => timeSync.getSnapshot()?.offsetMs ?? 0,
@@ -329,6 +359,7 @@ app.whenReady().then(() => {
         },
         memberPreview,
         memberLevels,
+        memberApi: { ...settings.browserMemberApi },
         reservation: browserReservation.getStatus(),
         reservationOptionKeyword: settings.browserReservationOptionKeyword,
         reservationMode: settings.browserReservationMode
@@ -386,7 +417,7 @@ app.whenReady().then(() => {
 
   registerIpc();
   createWindow();
-  logger.info('노무현 앱을 시작했습니다.', 'app');
+  logger.info('weidian 앱을 시작했습니다.', 'app');
   void browserBridge.start().catch((error) => {
     logger.error(`Chrome 브리지 시작 실패: ${error instanceof Error ? error.message : String(error)}`, 'browser');
   });

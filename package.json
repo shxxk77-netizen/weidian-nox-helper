@@ -1,7 +1,7 @@
 {
-  "name": "ew-weidian",
+  "name": "weidian",
   "version": "0.4.0",
-  "description": "노무현 — macOS Chrome companion for Weidian product viewing, local membership preview, image saving, time sync, and user-approved checkout preparation.",
+  "description": "weidian — macOS Chrome companion for Weidian product viewing, local membership preview, image saving, time sync, and user-approved checkout preparation.",
   "author": "Local",
   "private": true,
   "main": "out/main/main.js",
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "local.ew.weidian",
-    "productName": "노무현",
+    "productName": "weidian",
     "directories": {
       "output": "release"
     },

@@ -32,7 +32,7 @@ export class PageObservedActionTokenSource {
     if (this.pending.has(key)) {
       throw new MemberActionError(
         'ACTION_TOKEN_ALREADY_ACQUIRING',
-        '동일한 Member 컨텍스트에서 actionToken 감지가 이미 진행 중입니다.'
+        '동일한 Member 컨텍스트에서 wdtoken 감지가 이미 진행 중입니다.'
       );
     }
 
@@ -41,7 +41,7 @@ export class PageObservedActionTokenSource {
         this.pending.delete(key);
         reject(new MemberActionError(
           'ACTION_TOKEN_NOT_FOUND',
-          '실제 Weidian Member 페이지의 bootstrap·요청·응답에서 actionToken을 찾지 못했습니다.'
+          '로그인된 Chrome의 Weidian 요청에서 wdtoken을 찾지 못했습니다.'
         ));
       }, this.timeoutMs);
       this.pending.set(key, { resolve, reject, timer });

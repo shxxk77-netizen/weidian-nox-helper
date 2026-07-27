@@ -3,6 +3,7 @@ import type {
   BrowserBridgeState,
   BrowserCommand,
   BrowserCommandType,
+  BrowserMemberApiContractObservation,
   BrowserMemberLevel,
   BrowserMemberCommandResult,
   BrowserMemberServerState,
@@ -10,6 +11,8 @@ import type {
   BrowserPageSnapshot,
   BrowserReservationStatus
 } from '../common/types';
+import type { MemberApiConnectionSettings } from '../common/memberAnalysisContract';
+import { normalizeMemberApiContractObservation } from '../common/memberApiContract';
 import type { AppLogger } from './logger';
 
 export interface BrowserBridgePublicContext {
@@ -23,6 +26,7 @@ export interface BrowserBridgePublicContext {
   reservation: BrowserReservationStatus;
   reservationOptionKeyword: string;
   reservationMode: 'preview' | 'checkout';
+  memberApi: MemberApiConnectionSettings;
 }
 
 export interface BrowserBridgeHooks {
@@ -40,6 +44,7 @@ export class BrowserBridgeService {
   private lastError?: string;
   private commands: BrowserCommand[] = [];
   private lastMemberCommandResult?: BrowserMemberCommandResult;
+  private memberApiContracts: BrowserMemberApiContractObservation[] = [];
   private heartbeat?: NodeJS.Timeout;
 
   constructor(
@@ -99,6 +104,7 @@ export class BrowserBridgeService {
       lastSeenAtIso: this.lastSeenAtMs ? new Date(this.lastSeenAtMs).toISOString() : undefined,
       snapshot: this.snapshot,
       lastMemberCommandResult: this.lastMemberCommandResult,
+      memberApiContracts: this.memberApiContracts.map((contract) => ({ ...contract })),
       lastError: this.lastError
     };
   }
@@ -226,6 +232,56 @@ export class BrowserBridgeService {
         return;
       }
 
+      if (request.method === 'POST' && request.url === '/api/member-api-contract') {
+        const observation = normalizeMemberApiContractObservation(await readJsonBody(request));
+        const existingIndex = this.memberApiContracts.findIndex((item) => item.id === observation.id);
+        if (existingIndex >= 0) {
+          const existing = this.memberApiContracts[existingIndex];
+          this.memberApiContracts[existingIndex] = {
+            ...existing,
+            ...observation,
+            observedAtIso: existing.observedAtIso,
+            lastObservedAtIso: observation.lastObservedAtIso,
+            sampleCount: existing.sampleCount + 1
+          };
+        } else {
+          this.memberApiContracts.push(observation);
+        }
+        this.memberApiContracts = this.memberApiContracts
+          .sort((left, right) => right.lastObservedAtIso.localeCompare(left.lastObservedAtIso))
+          .slice(0, 150);
+        this.markSeen();
+        this.logger.info(
+          `Member API 관찰: ${observation.method} ${observation.url}`,
+          'member-contract',
+          {
+            id: observation.id,
+            source: observation.source,
+            shopId: observation.shopId,
+            page: observation.page,
+            method: observation.method,
+            url: observation.url,
+            queryKeys: observation.queryKeys,
+            queryShape: observation.queryShape,
+            requestHeaderNames: observation.requestHeaderNames,
+            requestHeaderMetadata: observation.requestHeaderMetadata,
+            requestBodyShape: observation.requestBodyShape,
+            tokenPlacement: observation.tokenPlacement,
+            chromeSessionCookie: observation.chromeSessionCookie,
+            status: observation.status,
+            responseHeaderNames: observation.responseHeaderNames,
+            responseContentType: observation.responseContentType,
+            responseBodyShape: observation.responseBodyShape
+          }
+        );
+        this.sendJson(response, 200, {
+          ok: true,
+          id: observation.id,
+          count: this.memberApiContracts.length
+        });
+        return;
+      }
+
       if (request.method === 'POST' && request.url === '/api/command-result') {
         this.lastMemberCommandResult = normalizeMemberCommandResult(await readJsonBody(request));
         if (this.lastMemberCommandResult.memberServerState && this.snapshot) {
@@ -323,6 +379,13 @@ export function normalizeBrowserObservation(value: unknown): BrowserPageSnapshot
     observedAtIso: optionalString(input.observedAtIso) || new Date().toISOString(),
     itemId: optionalString(input.itemId),
     shopId: optionalString(input.shopId),
+    buyerIds: Array.isArray(input.buyerIds)
+      ? [...new Set(
+          input.buyerIds
+            .map((value) => String(value || '').trim())
+            .filter((value) => /^[A-Za-z0-9_-]{1,100}$/.test(value))
+        )].slice(0, 200)
+      : [],
     shopName: optionalString(input.shopName),
     productTitle: optionalString(input.productTitle),
     priceText: optionalString(input.priceText),
@@ -352,7 +415,7 @@ const ALLOWED_COMMAND_TYPES = new Set<BrowserCommandType>([
   'save-all-images'
 ]);
 
-const SENSITIVE_MEMBER_KEYS = /^(?:actionToken|token|ct|cookie|authorization|qrCodeStatusKey|session|sessionId|accessToken|refreshToken)$/i;
+const SENSITIVE_MEMBER_KEYS = /^(?:actionToken|wdtoken|token|ct|cookie|authorization|qrCodeStatusKey|session|sessionId|accessToken|refreshToken)$/i;
 
 function assertNoSensitiveMemberValues(value: unknown, depth = 0): void {
   if (!value || typeof value !== 'object' || depth > 8) return;

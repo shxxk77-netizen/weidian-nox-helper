@@ -58,7 +58,7 @@ export class AppLogger extends EventEmitter {
   }
 }
 
-const SENSITIVE_KEY = /^(?:actionToken|token|ct|cookie|authorization|qrCodeStatusKey|session|sessionId|accessToken|refreshToken)$/i;
+const SENSITIVE_KEY = /^(?:actionToken|wdtoken|token|ct|cookie|authorization|qrCodeStatusKey|session|sessionId|accessToken|refreshToken)$/i;
 
 export function redactSensitiveData(value: unknown, depth = 0): unknown {
   if (value === undefined || value === null || depth > 10) return value;
@@ -73,7 +73,7 @@ export function redactSensitiveData(value: unknown, depth = 0): unknown {
 
 export function redactMessage(value: string): string {
   return String(value).replace(
-    /\b(actionToken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
+    /\b(actionToken|wdtoken|accessToken|refreshToken|qrCodeStatusKey|authorization|cookie|sessionId|session|token|ct)\b\s*[:=]\s*([^\s,;]+)/gi,
     '$1=[REDACTED]'
   );
 }

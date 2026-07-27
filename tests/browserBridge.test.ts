@@ -40,6 +40,13 @@ test('Electron 명령 payload는 actionToken 계열 민감 필드를 재귀적�
         targetIndex: 0
       },
       memberLevels: [],
+      memberApi: {
+        baseUrl: 'http://127.0.0.1:4173',
+        stateEndpoint: '/api/member/context',
+        actionTokenEndpoint: '/api/member/action-token',
+        saveEndpoint: '/api/member/save',
+        resetEndpoint: '/api/member/reset'
+      },
       reservation: { running: false, phase: 'idle', message: '' },
       reservationOptionKeyword: '',
       reservationMode: 'preview'

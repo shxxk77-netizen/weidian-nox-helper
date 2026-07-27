@@ -1,6 +1,6 @@
-# 노무현
+# weidian
 
-Chrome과 Weidian 모바일 웹을 제어하는 macOS Electron 앱입니다. 첨부 영상처럼 데스크톱 앱은 `상점 뷰어`와 `예약 주문` 탭을 제공하고, Chrome 페이지 오른쪽에는 `노무현` 확장 패널을 주입합니다.
+Chrome과 Weidian 모바일 웹을 제어하는 macOS Electron 앱입니다. 데스크톱 앱은 `상점 뷰어`와 `예약 주문` 탭을 제공하고, Chrome 페이지 오른쪽에는 `weidian` 확장 패널을 주입합니다.
 
 최종 결제, QR 스캔, 결제 비밀번호, 로그인, 본인인증, 캡차는 사용자가 직접 처리해야 합니다. 구매제한 해제, 대기열/선착순 우회, 인증 우회, 결제 자동 승인은 구현하지 않습니다.
 
@@ -23,8 +23,8 @@ Chrome과 Weidian 모바일 웹을 제어하는 macOS Electron 앱입니다. 첨
 - 실제 Member 응답(`memberIdentityCenter/1.0`) 관찰 기반 등급·진행도 읽기
 - 페이지 bootstrap·fetch·XHR의 actionToken 감지와 `empty → acquiring → ready/not-found` 상태 전이
 - Chrome 확장 메모리 전용 actionToken 수명주기와 fingerprint 표시
-- 실제 쓰기 endpoint 미설정 상태를 읽기·토큰 상태와 분리
-- 소유·승인된 `127.0.0.1:4173` Mock 서버를 통한 저장·초기화·재조회 테스트
+- 설정 화면에서 Member API Base URL과 endpoint 저장
+- 설정된 endpoint·JSON 헤더·요청 body를 cURL로 복사
 
 ## Member actionToken 보안 경계
 
@@ -70,11 +70,14 @@ pnpm run build:source
 ## 로컬 Member 취약점 재현 랩
 
 이 랩은 작성자가 주장한 접근제어 취약점 클래스를 로컬 메모리 서버에서 재현하고 수정 전후
-동작을 비교하기 위한 것입니다. 실제 Weidian 운영 endpoint를 사용하지 않습니다. 두 모드의
-`GET /health`는 항상 실제 쓰기 어댑터를 다음 상태로 보고합니다.
+동작을 비교하기 위한 것입니다. 확인되지 않은 Weidian 운영 endpoint를 사용하지 않습니다.
+두 정책 모드의 `GET /health`는 동일한 POST 계약을 반환합니다.
 
 ```text
-disabled / MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED
+POST /api/member/context
+POST /api/member/action-token
+POST /api/member/save
+POST /api/member/reset
 ```
 
 수정 모드는 기본값입니다.
@@ -165,11 +168,40 @@ GET  /health
 
 ## Member 페이지 접속
 
-로그인된 Chrome에서 본인 소유 또는 테스트 상점의 Member 상세 페이지를 엽니다.
+VIP 탭에는 상점 판매 페이지와 Member 링크를 함께 받는 입력창이 있습니다.
+
+- 입력 링크가 이미 Member 페이지이고 `shopId`가 있으면 즉시 canonical Member 주소로 엽니다.
+- 판매 링크에 `shopId`, `userid`, `userId`가 있으면 그 값을 사용합니다.
+- 상품 링크에 상점 ID가 없으면 판매 페이지를 먼저 열고, 확장이 실제 페이지에서 `shopId`를 감지한 뒤 Member 페이지로 자동 전환합니다.
+
+로그인된 Chrome에서 본인 소유 또는 테스트 상점의 Member 상세 페이지가 열립니다.
 
 ```text
 https://h5.weidian.com/m/mkt-h5-member-detail/index.html?shopId=상점ID
 ```
+
+## 현재 서버 POST 확인과 cURL
+
+실제 Member 페이지에서 발생한 Weidian 요청은 Chrome `webRequest`와 페이지의 `fetch`/XHR
+관찰기로 확인합니다. 앱의 `현재 서버 POST 전송 방식` 카드에는 다음 정보가 표시됩니다.
+
+- 실제 endpoint의 origin/path와 HTTP method
+- query/body의 키와 값 타입
+- Content-Type, Origin, Referer
+- actionToken 위치
+- Chrome 세션 Cookie 포함 여부
+- HTTP 상태와 응답 body의 키 구조
+
+앱이 만드는 cURL은 재현용 템플릿입니다. Cookie, Authorization, actionToken 원문은 수집하거나
+넣지 않으며 `<LOCAL_SESSION_COOKIE>`, `<ACTION_TOKEN>` 같은 자리표시자를 사용합니다. 기본
+POST 대상은 `http://127.0.0.1:4173/api/member/save`이며 설정 탭의 `Member API 연결`에서
+Base URL과 endpoint를 변경할 수 있습니다.
+
+VIP 셀렉박스를 바꾸면 POST 미리보기의 `serverIndex`와 `targetIndex`에는 같은 선택 인덱스가
+들어갑니다. `gradeNames`와 `name`은 배열이 아니라 선택한 VIP명 하나를 사용하고, `shopId`와
+`gradeCount`는 동기화된 Member 상태를 사용합니다. 앱의
+`POST 전송`은 셸에서 cURL을 실행하는 것이 아니라 Chrome 확장 service worker의 `fetch`로
+같은 JSON을 전송하며, actionToken은 전송 직전에 메모리에서 body에 넣습니다.
 
 VIP 탭에서 다음 순서로 확인합니다.
 
@@ -180,14 +212,28 @@ VIP 탭에서 다음 순서로 확인합니다.
 5. `서버 저장`
 6. 재조회된 `serverIndex`가 `targetIndex`와 같은지 확인
 
-## actionToken source 설정
+## 단일 Member 분석 계약
 
-실제 확장 런타임 기본값은
+확장 런타임은
 [`extension/src/member/member-action-adapter.ts`](extension/src/member/member-action-adapter.ts)의
-`LIVE_PAGE_MEMBER_CONFIG`입니다. Member 상태는 실제 페이지 컨텍스트에서 읽고 actionToken은
-Page Main 관찰기로 찾으며, 쓰기 endpoint만 `not-configured` 상태로 둡니다.
+`MEMBER_ANALYSIS_CONFIG` 하나를 기본값으로 사용합니다. Member 상태는 페이지 컨텍스트에서
+읽고 actionToken은 Page Main 관찰기로 찾으며, 설정 화면에서 저장한 다음 값이 브리지를 통해
+확장 service worker에 전달됩니다.
 
-`DEFAULT_AUTHORIZED_MEMBER_CONFIG`는 `127.0.0.1:4173` Mock 전체 저장 테스트에 사용합니다.
+```text
+baseUrl: http://127.0.0.1:4173
+state: /api/member/context
+actionToken: /api/member/action-token
+save: /api/member/save
+reset: /api/member/reset
+Accept: application/json
+Content-Type: application/json
+credentials: include
+```
+
+endpoint에는 `/api/member/save` 같은 상대 경로나 완전한 HTTP(S) URL을 사용할 수 있습니다.
+Chrome 전송 권한은 localhost, `127.0.0.1`, Weidian HTTPS 도메인에 포함되어 있습니다.
+설정 저장 후 확장이 다음 브리지 polling에서 새 값을 받아 실제 `fetch`와 cURL에 함께 적용합니다.
 
 actionToken은 API 주소나 payload를 대신하지 않습니다. 승인된 실제 관리자 API를 연결하려면
 다음 세 계약을 각각 공식 API 문서 또는 본인 소유 테스트 환경의 정상 네트워크 흐름으로
@@ -198,19 +244,14 @@ actionToken은 API 주소나 payload를 대신하지 않습니다. 승인된 실
 3. `writeEndpoint`: 저장/reset URL, Method, actionToken 위치, shopId·targetIndex 필드,
    현재 로그인 사용자 적용인지 explicit memberId가 필요한지 여부
 
-Origin, Referer, Content-Type, Chrome 쿠키 전달 방식과 성공·실패 응답 구조도 계약에 포함됩니다.
-현재 설정 타입은 이 계약을 선언하기 위한 것이며, 실제 쓰기 필드 매핑이 확인되면
-`LIVE_PAGE_MEMBER_CONFIG.writeEndpoint`에 정확한 Weidian HTTPS endpoint와 필드 계약을
-설정합니다. 라이브 모드는 `*.weidian.com` HTTPS만 허용하고 Mock 모드는
-`127.0.0.1:4173`만 허용합니다.
+Origin, Referer, Content-Type, 쿠키 전달 방식과 성공·실패 응답 구조도 관찰 계약에 포함됩니다.
+프로그램은 관찰된 endpoint를 자동 선택하지 않으며 사용자가 설정 화면에서 저장한 값만 사용합니다.
 
-미설정 상태에서는 네트워크 요청 전에 다음 오류를 반환합니다.
+페이지 관찰 단계에서는 다음 오류를 구분합니다.
 
 ```text
 ACTION_TOKEN_SOURCE_NOT_CONFIGURED
 ACTION_TOKEN_NOT_FOUND
-MEMBER_STATE_ENDPOINT_NOT_CONFIGURED
-MEMBER_WRITE_ENDPOINT_NOT_CONFIGURED
 ```
 
 `save_vip_settings`, `sync_vip_grades`, `reset_vip_settings`는 앱 내부 명령명이며 실제 Weidian
@@ -230,23 +271,23 @@ npm run package:local
 결과:
 
 ```text
-release/mac-arm64-v0.4/노무현.app
-release/mac-arm64-v0.4/노무현-v0.4.0-mac-arm64.zip
+release/mac-arm64-v0.4/weidian.app
+release/mac-arm64-v0.4/weidian-v0.4.0-mac-arm64.zip
 ```
 
 배포 기준은 ZIP입니다. 스크립트는 임시 경로에서 앱을 서명하고 ZIP 추출본까지 검증합니다.
 
 ## Chrome 확장 설치
 
-1. `노무현` 앱을 실행합니다.
+1. `weidian` 앱을 실행합니다.
 2. 앱의 `확장 폴더` 버튼을 누릅니다.
 3. Chrome에서 `chrome://extensions`를 엽니다.
 4. `개발자 모드`를 켭니다.
 5. `압축해제된 확장 프로그램을 로드`를 누릅니다.
-6. 앱이 열어준 `ew-weidian-chrome-extension` 폴더를 선택합니다.
+6. 앱이 열어준 `weidian-chrome-extension` 폴더를 선택합니다.
 7. Weidian 상품 URL을 열고 로그인은 직접 완료합니다.
 
-정상 연결되면 앱의 브리지 상태가 `연결됨`으로 바뀌고, Weidian 페이지 오른쪽에 어두운 `노무현` 패널이 나타납니다.
+정상 연결되면 앱의 브리지 상태가 `연결됨`으로 바뀌고, Weidian 페이지 오른쪽에 어두운 `weidian` 패널이 나타납니다.
 
 ## 테스트
 
@@ -331,7 +372,7 @@ endpoint 미설정, 권한 거부와 컨텍스트 불일치는 자동 재시도�
 - Electron IPC payload와 React state
 - 로그·오류 메시지·Crash dump
 
-앱 로그는 macOS Electron `userData/logs/ew-weidian.log`에 기록됩니다. `actionToken`, `token`,
+앱 로그는 macOS Electron `userData/logs/weidian.log`에 기록됩니다. `actionToken`, `token`,
 `ct`, `cookie`, `authorization`, `qrCodeStatusKey`, session 관련 키는 중앙 Logger에서
 `[REDACTED]` 처리됩니다.
 

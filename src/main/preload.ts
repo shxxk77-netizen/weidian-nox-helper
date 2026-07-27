@@ -5,6 +5,7 @@ import type {
   BrowserBridgeState,
   BrowserCommand,
   BrowserCommandType,
+  MemberPageOpenResult,
   BrowserReservationRequest,
   BrowserReservationStatus,
   LogEntry,
@@ -27,6 +28,8 @@ const api: RendererApi = {
   },
   getBrowserBridgeState: (): Promise<BrowserBridgeState> => ipcRenderer.invoke('browser:bridge-state'),
   openInChrome: (url: string): Promise<void> => ipcRenderer.invoke('browser:open-url', url),
+  openMemberInChrome: (url: string, detectedShopId?: string): Promise<MemberPageOpenResult> =>
+    ipcRenderer.invoke('browser:open-member-url', url, detectedShopId),
   showExtensionFolder: (): Promise<void> => ipcRenderer.invoke('browser:show-extension-folder'),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:copy-text', text),
   saveCurrentStore: (store: Omit<SavedStore, 'savedAtIso'>): Promise<AppSettings> =>

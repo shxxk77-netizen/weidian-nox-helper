@@ -78,14 +78,14 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
         status: 'empty',
         shopId: context.shopId,
         action,
-        oneTime: true
+        oneTime: false
       };
     }
     if (token.expiresAtEpochMs !== undefined && token.expiresAtEpochMs <= this.now()) {
       this.tokens.delete(key);
       const expired = this.meta(token, 'expired', {
         lastErrorCode: 'ACTION_TOKEN_EXPIRED',
-        lastErrorMessage: 'actionToken이 만료되었습니다.'
+        lastErrorMessage: 'wdtoken이 만료되었습니다.'
       });
       this.statusOverrides.set(key, expired);
       this.publish(context, expired);
@@ -100,14 +100,14 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
     this.assertContext(context);
     const key = this.tokenKey(context, action);
     if (this.acquiring.has(key)) {
-      throw new MemberActionError('ACTION_TOKEN_ALREADY_ACQUIRING', 'actionToken 발급이 이미 진행 중입니다.');
+      throw new MemberActionError('ACTION_TOKEN_ALREADY_ACQUIRING', 'wdtoken 감지가 이미 진행 중입니다.');
     }
     this.tokens.delete(key);
     const acquiringMeta: BrowserActionTokenMeta = {
       status: 'acquiring',
       shopId: context.shopId,
       action,
-      oneTime: true
+      oneTime: false
     };
     this.statusOverrides.set(key, acquiringMeta);
     this.publish(context, acquiringMeta);
@@ -125,7 +125,7 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
           status: errorCodeToTokenStatus(caught.code),
           shopId: context.shopId,
           action,
-          oneTime: true,
+          oneTime: false,
           lastErrorCode: caught.code,
           lastErrorMessage: caught.message
         };
@@ -149,13 +149,13 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
     this.assertContext(context);
     const rawToken = acquired.rawToken?.trim();
     if (!rawToken) {
-      throw new MemberActionError('ACTION_TOKEN_MISSING', '감지된 actionToken이 비어 있습니다.');
+      throw new MemberActionError('ACTION_TOKEN_MISSING', '감지된 wdtoken이 비어 있습니다.');
     }
     if (
       acquired.expiresAtEpochMs !== undefined &&
       acquired.expiresAtEpochMs <= this.now()
     ) {
-      throw new MemberActionError('ACTION_TOKEN_EXPIRED', '감지된 actionToken이 이미 만료되었습니다.');
+      throw new MemberActionError('ACTION_TOKEN_EXPIRED', '감지된 wdtoken이 만료되었습니다.');
     }
     const key = this.tokenKey(context, action);
     const fingerprint = await fingerprintToken(rawToken);
@@ -242,15 +242,15 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
     const expiredMeta: BrowserActionTokenMeta = token
       ? this.meta(token, 'expired', {
           lastErrorCode: 'ACTION_TOKEN_EXPIRED',
-          lastErrorMessage: 'actionToken이 만료되었습니다.'
+          lastErrorMessage: 'wdtoken이 만료되었습니다.'
         })
       : {
           status: 'expired',
           shopId: context.shopId,
           action,
-          oneTime: true,
+          oneTime: false,
           lastErrorCode: 'ACTION_TOKEN_EXPIRED',
-          lastErrorMessage: 'actionToken이 만료되었습니다.'
+          lastErrorMessage: 'wdtoken이 만료되었습니다.'
         };
     this.statusOverrides.set(key, expiredMeta);
     this.publish(context, expiredMeta);
@@ -269,7 +269,7 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
           status: 'invalid',
           shopId: context.shopId,
           action,
-          oneTime: true,
+          oneTime: false,
           lastErrorCode: 'ACTION_TOKEN_INVALID',
           lastErrorMessage: sanitizeMemberErrorMessage(reason)
         };
@@ -292,7 +292,7 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
         status,
         shopId: context.shopId,
         action,
-        oneTime: true
+        oneTime: false
       }),
       lastErrorCode: code,
       lastErrorMessage: sanitizeMemberErrorMessage(message)
@@ -365,13 +365,13 @@ export class InMemoryActionTokenManager implements ActionTokenManager {
       if (token.shopId === context.shopId && token.sessionFingerprint !== context.sessionFingerprint) {
         return this.meta(token, 'session-mismatch', {
           lastErrorCode: 'SESSION_CHANGED',
-          lastErrorMessage: '로그인 세션이 변경되어 기존 actionToken을 사용할 수 없습니다.'
+          lastErrorMessage: '로그인 세션이 변경되어 기존 wdtoken을 사용할 수 없습니다.'
         });
       }
       if (token.sessionFingerprint === context.sessionFingerprint && token.shopId !== context.shopId) {
         return this.meta(token, 'shop-mismatch', {
           lastErrorCode: 'SHOP_ID_MISMATCH',
-          lastErrorMessage: '다른 상점에서 발급된 actionToken입니다.'
+          lastErrorMessage: '다른 상점 컨텍스트에서 감지된 wdtoken입니다.'
         });
       }
     }
